@@ -1,0 +1,65 @@
+You are given extracted data from up to three sources: PDF, Web, and Excel. These contain structured information from rent contracts.
+
+Your task is to:
+1. Extract the following fields from each source (if available):
+- Unit number
+- Type
+- Customer
+- Customer Address
+- Customer Brand
+- Building
+- Area in square meter
+- Contract Start Date
+- Contract End Date
+- Rent charge
+- Service charge
+- Other service charge (in the renting space)
+- Other service charge (public space)
+- Utilities charge (water)
+- Utilities charge (Electricity)
+- Utilities charge (cooking gas)
+- Rent Insurance
+- Service Insurance
+- Land and building tax
+- Name on Citizen ID card
+- Address on Citizen ID card
+- Citizen ID Number
+
+2. Compare each field across the sources.
+3. Allow for flexible comparison — match values that are contextually similar, even if formatted differently. Examples:
+   - "March 10, 2025" vs "10/03/2025"
+   - "$1,000.00" vs "1000"
+   - "ซีพี" vs "CP"
+   - With/without commas, units like "THB", or different date formats
+
+4. If a value is missing in one or more sources, mark the match as **false**.
+
+5. Return the result as a list of objects in this JSON format:
+
+```json
+[
+  {
+    "field": "Customer",
+    "pdf": "Wisarut Gunjarueg",
+    "web": "Mr. Wisarut G.",
+    "excel": "Wisarut Gunjarueg",
+    "match": true,
+    "reason": "All refer to the same person with different naming styles"
+  },
+  {
+    "field": "Rent charge",
+    "pdf": "$15,000.00",
+    "web": "15000",
+    "excel": "15,000.00 THB",
+    "match": true,
+    "reason": "Same value represented in different formats"
+  },
+  {
+    "field": "Contract Start Date",
+    "pdf": "March 10, 2025",
+    "web": "10/03/2025",
+    "excel": null,
+    "match": false,
+    "reason": "Missing value in Excel"
+  }
+]

@@ -1,0 +1,388 @@
+.dashboardWrapper {
+  display: flex;
+  flex-direction: column;
+  padding: 2rem;
+  background-color: #f0f0f0;
+  width: 100%;
+}
+
+.dashboardTitle {
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #026d62;
+}
+
+
+
+.kpiGauge {
+  width: 30vh;
+  min-width: 200px;
+  height: 160px;
+  background-color: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  padding: 1rem;
+  text-align: center;
+}
+
+.kpiGauge h4 {
+  font-size: 1rem;
+  color: #333;
+  margin-bottom: 0.5rem;
+}
+
+.chartWrapper {
+  width: 45%;
+  max-width: 1000px;
+  margin: 2rem auto;
+  background-color: #ffffff;
+  padding: 1.5rem;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
+}
+
+/* Filters Section */
+.filtersWrapper {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  margin: 0.5rem 0;
+  flex-wrap: wrap;
+}
+
+.filtersWrapper input,
+.filtersWrapper select,
+.filtersWrapper button {
+  padding: 0.6rem;
+  font-size: 1rem;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  outline: none;
+}
+
+.filtersWrapper input {
+  width: 30%;
+  min-width: 200px;
+}
+
+.filtersWrapper select {
+  width: 20%;
+}
+
+.filtersWrapper button {
+  background-color: #026d62;
+  color: white;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background-color 0.3s;
+}
+
+.filtersWrapper button:hover {
+  background-color: #00bfa6;
+}
+
+/* Table Styles */
+.resultTable {
+  width: 100%;
+  border-collapse: collapse;
+  background-color: white;
+  border: 1px solid #ccc;
+}
+
+.resultTable th,
+.resultTable td {
+  border: 1px solid #ccc;
+  padding: 0.75rem;
+  text-align: left;
+  font-size: 0.95rem;
+}
+
+.expandButton {
+  background-color: #eee;
+  border: none;
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+}
+
+.resultBlock {
+  margin-top: 1rem;
+  background-color: #fff;
+  padding: 1rem;
+  border: 1px solid #ccc;
+}
+
+.resultBlock table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.5rem;
+}
+
+.resultBlock th,
+.resultBlock td {
+  border: 1px solid #ccc;
+  padding: 0.5rem;
+  text-align: left;
+  font-size: 0.9rem;
+}
+
+.popupLink {
+  color: #007bff;
+  text-decoration: underline;
+  font-size: 0.9rem;
+}
+
+/* Expand Details */
+.expandButton {
+  background-color: #ccc;
+  border: none;
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+  color: white;
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
+.expandButton:hover {
+  background-color: #026d62;
+}
+
+/* Export Button Styles */
+button.exportButton {
+  background-color: #00bfa6;
+  color: white;
+  padding: 0.7rem 1.2rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background-color 0.3s;
+}
+
+button.exportButton:hover {
+  background-color: #026d62;
+}
+
+
+
+
+/*Lead Status styles*/
+/* Wrapper for the Lead Status filter */
+.leadStatusWrapper {
+  display: flex;
+  flex-direction: column;
+  margin: 1rem 0;
+}
+
+/* Label for the Lead Status dropdown */
+.leadStatusLabel {
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: #333;
+  font-size: 1rem;
+}
+
+/* Style for the dropdown select input */
+.leadStatusSelect {
+  width: 200px;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  background-color: #fff;
+  font-size: 1rem;
+  color: #333;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+/* Focus effect */
+.leadStatusSelect:focus {
+  border-color: #00bfa6; /* Greenish focus border */
+  outline: none;
+  box-shadow: 0 0 5px rgba(0, 191, 166, 0.5); /* Subtle glow on focus */
+}
+
+/* Style for the Lead Status options */
+.leadStatusSelect option {
+  padding: 0.5rem;
+  font-size: 1rem;
+}
+
+/* Hover effect */
+.leadStatusSelect:hover {
+  border-color: #026d62;
+  background-color: #f7f7f7;
+}
+
+/* Style for specific lead status */
+.leadStatusOptionAcknowledge {
+  background-color: #f0ad4e; /* Acknowledge - Amber */
+  color: white;
+}
+
+.leadStatusOptionInProgress {
+  background-color: #0275d8; /* In Progress - Blue */
+  color: white;
+}
+
+.leadStatusOptionResolved {
+  background-color: #5cb85c; /* Resolved - Green */
+  color: white;
+}
+
+/* Hover effect for each option */
+.leadStatusOptionAcknowledge:hover,
+.leadStatusOptionInProgress:hover,
+.leadStatusOptionResolved:hover {
+  opacity: 0.8;
+}
+
+/* Add modern card styling */
+/* Adjusted Modern Card Styling */
+.kpiCard {
+  background-color: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  padding: 1.5rem;  /* Reduced padding to make the card lower */
+  text-align: center;
+  margin-bottom: 1rem;
+  width: 200px;  /* Set width to be fixed */
+  height: 120px;  /* Set a lower height */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+}
+
+/* Card Title Styling */
+.kpiCard h3 {
+  font-size: 1rem;  /* Slightly smaller title */
+  color: #333;
+  margin-bottom: 0.5rem;  /* Adjusted margin for better spacing */
+}
+
+/* Card Value Styling */
+.kpiCardValue {
+  font-size: 1.5rem;  /* Adjusted font size for the value */
+  font-weight: bold;
+  color: #00bfa6;  /* Green for Passed, Red for Needs Review */
+}
+
+/* Optional: Color Adjustment for Status (you can dynamically set colors based on status) */
+.kpiCardValue span {
+  color: #333;  /* Adjust the color of the text */
+}
+
+/* Align cards to the left side */
+.kpiWrapper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  justify-content: flex-start;  /* Align the cards to the left */
+  padding: 0rem 0;
+}
+
+.buttonOpenPopup {
+  background-color: #1e88e5;         /* Blue background */
+  color: white;                      /* White text */
+  border: none;                      /* Remove default border */
+  padding: 8px 16px;                 /* Spacing inside the button */
+  font-size: 14px;                   /* Font size */
+  border-radius: 8px;                /* Rounded corners */
+  cursor: pointer;                   /* Pointer on hover */
+  transition: background-color 0.2s ease-in-out; /* Smooth hover effect */
+}
+
+.buttonOpenPopup:hover {
+  background-color: #1565c0;         /* Darker blue on hover */
+}
+
+/* App.module.css or any CSS Module file */
+.forceProcessButton {
+  background-color: #dd1717; /* Green color for "force" action */
+  color: white;
+  border: none;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.forceProcessButton:hover {
+  background-color: #218838;
+}
+
+.forceProcessButton:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+
+.workflowStatusCell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.refreshButton {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 5px;
+  transition: transform 0.2s;
+}
+
+.refreshButton:hover {
+  transform: rotate(20deg);
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #ccc;
+  border-top: 2px solid #007bff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.refreshIconButton {
+  background-color: #f0f0f0;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 4px;
+  margin-left: 6px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.refreshIconButton:hover {
+  background-color: #e0e0e0;
+  border-color: #999;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* If you need to ensure responsiveness on small screens */
+@media (max-width: 768px) {
+  .kpiCard {
+    width: 100%;  /* Cards should be full-width on smaller screens */
+    height: auto;  /* Auto adjust height based on content */
+  }
+}

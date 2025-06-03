@@ -1,0 +1,24 @@
+/* ===== APNonTradeInvoiceMatch.module.css ===== */
+.container {
+    padding: 20px;
+    text-align: center;
+  }
+  
+  h1 {
+    font-size: 24px;
+    margin-bottom: 20px;
+  }
+  
+  input[type="file"] {
+    margin: 10px 0;
+  }
+  
+  .dataContainer {
+    margin-top: 20px;
+    padding: 15px;
+    background-color: #f9f9f9;
+    border: 1px solid #ccc;
+    font-family: 'Courier New', Courier, monospace;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
