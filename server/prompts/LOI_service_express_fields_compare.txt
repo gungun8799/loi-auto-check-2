@@ -1,31 +1,67 @@
-You are given extracted data from up to three sources: PDF, Web, and Excel. These contain structured information from rent contracts.
+You are given extracted data from  two sources: PDF, Web,. These contain structured information from rent contracts.
 
 Your task is to:
 1. Extract the following fields from each source (if available):
-- Unit number
-- Type
-- Customer
-- Customer Address
-- Customer Brand
-- Building
-- Area in square meter
-- Contract Start Date
-- Contract End Date
-- Rent charge
-- Service charge
-- Other service charge (in the renting space)
-- Other service charge (public space)
-- Utilities charge (water)
-- Utilities charge (Electricity)
-- Utilities charge (cooking gas)
-- Rent Insurance
-- Service Insurance
-- Land and building tax
-- Name on Citizen ID card
-- Address on Citizen ID card
-- Citizen ID Number
+"Building" (this field will contain word "ซีพี" ),
+  "Lease Type" (Need to check "4. ค่าเช่าและบริการ" whether the payment condition is "Permanent Fixed" or not ),
+  "Brand Name" (ชื่อร้าน or brand name),
+  "Customer Name",
+  "Customer Address",
+  "Tenant Type",(this field is close to the Unit number start with "PN", on web you should take the value after PNX for for example if tit's PN7 - PN furnitue, take the value furniture),
+  "Proposed lease commencement date",
+  "Proposed lease expiry date",
+  "Unit ID", (in this format PXXXX where x is the number )
+  "Space (NLA)", (Area in square meter),
+  "Billing Frequency",
+  "Monthly charge", (Output in "Yes", or "No"),
+  
+  These fileds will be the rental rate, start date and end date of the monthly rent in 3 years, for PDF doc Need to check "4. ค่าเช่าและบริการ" section
+  "Year 1 : Contract Start date",
+  "Year 1 : Contract End date",
+  "Year 1 : Charge Type",
+  "Year 1 : Monthly Amount of rent",
+  "Year 1 : Monthly Amount of service",
+
+  "Year 2 : Contract Start date",
+  "Year 2 : Contract End date",
+  "Year 2 : Charge Type",
+  "Year 2 : Monthly Amount of rent",
+  "Year 2 : Monthly Amount of service",
+
+  "Year 3 : Contract Start date",
+  "Year 3 : Contract End date",
+  "Year 3 : Charge Type",
+  "Year 3 : Monthly Amount of rent",
+  "Year 3 : Monthly Amount of service",
+
+  "Other service charge (in the renting space)",
+  "Other service charge (in the renting space) Charge description", (if "Other service charge (in the renting space)" is 0, this field valid of null)
+  "Other service charge (in the renting space) start date"
+  "Other service charge (in the renting space) end date"
+  "Other service charge (public space)",
+  "Other service charge (public space) Charge description",(if "Other service charge (in the renting space)" is 0, this field valid of null)
+  "Other service charge (public space) start date",
+  "Other service charge (public space) end date",
+
+  "Include Utility", (output in "Yes" or "No")
+  "Utilities charge (water)", 
+  "Utilities charge (Electricity)",
+  "Utilities charge (cooking gas)", 
+
+  "Total Rent Deposits",
+  "Total Service Deposits",
+  "Lease property tax", 
+  When extracting the “Lease property tax” field, apply these rules to decide if the PDF value is valid compared to the web value:
+	1.	Web value: “PTS-PT Standard”
+	•	PDF value must be exactly “10.00” to be valid.
+	2.	Web value: “PT Mall”
+	•	PDF value must be exactly “12.5” to be valid.
+	3.	Web value: null or missing
+	•	PDF value must be “0” to be valid.
+
 
 2. Compare each field across the sources.
+
 3. Allow for flexible comparison — match values that are contextually similar, even if formatted differently. Examples:
    - "March 10, 2025" vs "10/03/2025"
    - "$1,000.00" vs "1000"
@@ -42,7 +78,6 @@ Your task is to:
     "field": "Customer",
     "pdf": "Wisarut Gunjarueg",
     "web": "Mr. Wisarut G.",
-    "excel": "Wisarut Gunjarueg",
     "match": true,
     "reason": "All refer to the same person with different naming styles"
   },
@@ -50,7 +85,6 @@ Your task is to:
     "field": "Rent charge",
     "pdf": "$15,000.00",
     "web": "15000",
-    "excel": "15,000.00 THB",
     "match": true,
     "reason": "Same value represented in different formats"
   },
@@ -58,7 +92,6 @@ Your task is to:
     "field": "Contract Start Date",
     "pdf": "March 10, 2025",
     "web": "10/03/2025",
-    "excel": null,
     "match": false,
     "reason": "Missing value in Excel"
   }

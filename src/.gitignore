@@ -1,0 +1,17 @@
+# node_modules and build output
+node_modules/
+build/
+
+# any uploaded files you don’t want in Git
+server/uploads/
+
+# local environment files
+.env
+.env.local
+.env.*.local
+
+# macOS / editor cruft
+.DS_Store
+.vscode/
+.idea/
+*.log

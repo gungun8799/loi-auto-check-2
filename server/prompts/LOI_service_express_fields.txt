@@ -1,42 +1,90 @@
 Extract key fields from the following rent contract content and return these fields in JSON format
-  
-  "Contract Number" (This will be under Opp field),
-  "Unit number",
-  "AAAAAAAAAAAAAAA",
-  "Type",
-  "Lease Type",
-  "Workflow status" (there can only be these workflows in order Start, Draft, Pending GTO Update, Pending Approval, Rejected,  ),
-  "Customer",
-  "Tenant Type",
+  "Building Name", this field will contain this format "5066 - บมจ. ซีพี แอ็กซ์ตร้า ปากช่อง (5066)" or "บมจ. ซีพีแอ๊กซ์ตร้าบางปะกอก(5036)" just extract the building name "บมจ. ซีพี แอ็กซ์ตร้า ปากช่อง ",
+  "Building ID", this field will contain this format "5066 - บมจ. ซีพี แอ็กซ์ตร้า ปากช่อง (5066)" or "บมจ. ซีพีแอ๊กซ์ตร้าบางปะกอก(5036)" just extract the 4 digits building ID ,
+  "Contract Number" (This will be under Opp field, on web it's called "lease Offer nunber" or "lease renewal number"),
+  "Lease Type" (Need to check "4. ค่าเช่าและบริการ" whether the payment condition is "Permanent Fixed" or not ),
+  "Brand Name" (ชื่อร้าน or brand name),
+  "Property Type",
+  "Customer Name",
   "Customer Address",
-  "Customer Brand",
-  "Building" (this field will contain word "ซีพี" ),
-  "Area in square meter",
-  "Contract Start Date",
-  "Contract End Date",
-  "Rent charge",
-  "Service charge",
-  "Other service charge (in the renting space)",
+  "Tenant Type",(this field is close to the Unit number start with "PN", for web scrape extract the value after "-", for example if the field is "PN3 - PN Car Service & Maintenance", put "PN Car Service & Maintenance" in this field  ),
+  "Tenant selection",(Put as "No" for now)
+   "Big Tenant",(Put as "No" for now)
+  "Proposed lease commencement date",
+  "Proposed lease expiry date",
+  "Unit ID", (in this format PXXXX where x is the number )
+  "Space (NLA)", (Area in square meter),
+  "Space Design Type",
+  "Billing Options", (Have to select calenday month, fill this field in "Calendar Month" or "Anniversary Month")
+  "Billing Frequency",
+  "Payment Term", 
+  "Monthly rental rate",
+  "Rental Ratio",      
+  "Lease property tax rate" (check for two type of field, type like "PTS - PT Standard", "PT - MALL", or number "10", "12.5"),
+  "Monthly charge", (Output in "Yes", or "No"),
+  
+  These fileds will be the rental rate, start date and end date of the monthly rent in 3 years, for PDF doc Need to check "4. ค่าเช่าและบริการ" section
+  "Year 1 : Contract Start date",
+  "Year 1 : Contract End date",
+  "Year 1 : Charge Type", (for PDF heck from section "4.ค่าเช่าและค่าบริการ" if it's "Fixed rate" or "Not Fixed rate")
+  "Year 1 : Monthly Amount of rent",
+  "Year 1 : Monthly Amount of service",
+
+  "Year 2 : Contract Start date",
+  "Year 2 : Contract End date",
+  "Year 2 : Charge Type",(for PDF heck from section "4.ค่าเช่าและค่าบริการ" if it's "Fixed rate" or "Not Fixed rate")
+  "Year 2 : Monthly Amount of rent",
+  "Year 2 : Monthly Amount of service",
+
+  "Year 3 : Contract Start date",
+  "Year 3 : Contract End date",
+  "Year 3 : Charge Type",(for PDF heck from section "4.ค่าเช่าและค่าบริการ" if it's "Fixed rate" or "Not Fixed rate")
+  "Year 3 : Monthly Amount of rent",
+  "Year 3 : Monthly Amount of service",
+
+  "Other service charge (in the renting space)",if you cannot find anything, put the value as 0.00
+  "Other service charge (in the renting space) Charge description",
+  "Other service charge (in the renting space) start date"
+  "Other service charge (in the renting space) end date"
   "Other service charge (public space)",
-  "Utilities charge (water)",
-  "Utilities charge (Electricity)",
-  "Utilities charge (cooking gas)",
-  "Rent Insurance",
-  "Service Insurance",
-  "Land and building tax",
-  "CP Axtra signee 1" (has signature or not),
-  "CP Axtra signee 1" (name of the signed person),
-  "CP Axtra witness" (has signature or not),
-  "CP Axtra witness" (name of the signed person),
-  "Customer signee 1" (has signature or not),
-  "Customer signee 1" (name of the signed person),
-  "Customer signee 2" (has signature or not),
-  "Customer signee 2" (name of the signed person),
-  "Customer witness" (has signature or not),
-  "Customer witness" (name of the signed person),
+  "Other service charge (public space) Charge description",
+  "Other service charge (public space) start date",
+  "Other service charge (public space) end date",
+
+  "Include Utility", (output in "Yes" or "No", on PDF, Yes if one of this has non-zero value "Utilities charge (water)","Utilities charge (Electricity)",   "Utilities charge (cooking gas)")
+  "Utilities charge (water)",on web check the "Meter Type" column and extract number value from "Tariff as at Contract Start Date"  column, if you cannot find anything, put the value as 0.00
+  "Utilities charge (Electricity)",on web check the "Meter Type" column and extract number value from "Tariff as at Contract Start Date"  column, if you cannot find anything, put the value as 0.00
+  "Utilities charge (cooking gas)",on web check the "Meter Type" column and extract number value from "Tariff as at Contract Start Date"  column, if you cannot find anything, put the value as 0.00
+
+  "Total Rent Deposits",
+  "Total Service Deposits",
+
+// If a signature line is present, put true; if no signature line at all, put false.  
+// For each “(name of the signed person)”, if that printed name is missing, leave as null.  
+"CP Axtra signee 1",        // true or false  
+"CP Axtra signee 1 (name of the signed person)", // printed name or null  
+"CP Axtra witness",         // true or false  
+"CP Axtra witness (name of the signed person)",  // printed name of the nearest field to "พยาน"
+"Customer signee 1",        // true or false  
+"Customer signee 1 (name of the signed person)",// printed name or null  
+
+// —— NEW: exactly how to find Customer signee 2 ——
+// In this contract, the second “โดย” block (in Thai) is the second customer signature.
+// Step 1: find the first occurrence of the exact Hebrew/Thai word “โดย” outside any parentheses.
+// Step 2: skip down past its signature field. The printed name immediately after (on the next line) is Customer signee 1.
+// Step 3: find the second occurrence of “โดย” outside parentheses on the same half-page. Skip any noise (e.g. “Time 6-03-25”, “พยาน”, etc.) until you see a parenthesis “(” followed by a name string.
+// Step 4: that name string (e.g. “เขษฐา วราฤทธิ์”) is Customer signee 2’s printed name.  
+"Customer signee 2",        // true or false  
+"Customer signee 2 (name of the signed person)", // e.g. “เขษฐา วราฤทธิ์” or null  
+
+"Customer witness",         // true or false  
+"Customer witness (name of the signed person)",  // printed name or null  
+
+
   "Name on Citizen ID card ",
   "Address on Citizen ID card ",
   "Citizen ID Number",
   "Citizen ID expiration date"
 
-  For signature field, some people might just signed but doesn't fill the name. In this case, just put has signature or not as true but name of the signed person as null 
+  "Workflow status" (there can only be these workflows in order: Start, Draft, Pending GTO Update, Pending Approval, Accepted,Rejected,  ),
+

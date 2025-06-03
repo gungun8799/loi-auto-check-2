@@ -29,7 +29,10 @@ const app = express();
 const upload = multer({ dest: 'uploads/' });
 app.use(cors());
 app.use(express.json());
-
+app.use(
+  '/prompts',
+  express.static(path.join(__dirname, 'prompts'))
+);
 
 // Add this route for checking file metadata and saving to Firebase
 app.post('/api/process-pdf-folder', async (req, res) => {
@@ -39,6 +42,14 @@ app.post('/api/process-pdf-folder', async (req, res) => {
   const fileData = [];
 
   for (const file of files) {
+    // ── IMMEDIATELY skip any filename that isn’t digits + "_" + (LO|LR) + digits + "_" + digits ──
+    const baseName = file.replace(/\.pdf$/i, '');
+    const validPattern = /^\d+_(?:LO|LR)\d+_\d+$/;
+    if (!validPattern.test(baseName)) {
+      console.log(`[⏭️  Skipping invalid filename on server] ${file}`);
+      continue;
+    }
+    
     const filePath = path.join(folderPath, file);
     
     // Get last modified timestamp of the file
@@ -329,6 +340,44 @@ app.post('/api/extract-text', upload.array('files'), async (req, res) => {
   res.json({ success: true, text: combinedText, geminiOutput: geminiText });
 });
 
+// --- LOGIN endpoint ---
+app.post('/api/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Missing email or password' });
+  }
+
+  try {
+    // Query Firestore collection 'user_login' where field 'email' == submitted email
+    const snapshot = await db
+      .collection('user_login')
+      .where('email', '==', email)
+      .limit(1)
+      .get();
+
+    if (snapshot.empty) {
+      // No user found with that email
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const userDoc = snapshot.docs[0];
+    const data = userDoc.data();
+
+    // Simple plaintext comparison (since your example stores password="123456")
+    if (data.password !== password) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Successful login → return email & role
+    return res.json({
+      email: data.email,
+      role: data.role,
+    });
+  } catch (err) {
+    console.error('[LOGIN ERROR]', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
 
 // ===== Excel Sheet Upload - Get Sheet Names =====
 app.post('/api/get-sheet-names', upload.single('file'), async (req, res) => {
@@ -475,6 +524,7 @@ app.post('/api/scrape-url', async (req, res) => {
         input.focus();
       }, contractNumber);
 
+      // <<< REPLACED CLICK TECHNIQUE >>>
       console.log('[Simplicity] Clicking search <a> button...');
       await frame.waitForSelector('a#panel_buttonSearch_bt', { visible: true, timeout: 10000 });
       await frame.evaluate(() => {
@@ -528,10 +578,11 @@ app.post('/api/scrape-url', async (req, res) => {
         console.warn('[⚠️ popup.waitForNavigation] Timeout or already loaded');
       });
 
-      const encodedContract = encodeURIComponent(contractNumber);
-      const popupUrl = `https://ppe-mall-management.lotuss.com/Simplicity-uat/modules/lease/leaseoffer/edit.aspx?ID=${encodedContract}&SEARCH=1`;
+      // build your TYPE value however you need, then…
+     // const encodedType = encodeURIComponent(typeValue);  // ← whatever logic you use to pick/type‐encode your TYPE
+      const popupUrl = popup.url();
       console.log('[Simplicity] Final popup URL with params:', popupUrl);
-
+      
       console.log('[Simplicity] Expanding all collapsible sections...');
       const collapsibleIds = [
         '#panelMonthlyCharge_label',
@@ -631,8 +682,9 @@ app.post('/api/open-popup-tab', async (req, res) => {
   try {
     let browser, page;
 
+    // --- LOGIN STEP (two-step) ---
     if (!browserSessions.has(systemType)) {
-      console.log('[🔑 Not logged in — triggering login using fixed credentials]');
+      console.log('[🔑 Not logged in — triggering two-step login]');
 
       const puppeteer = await import('puppeteer');
       browser = await puppeteer.launch({
@@ -642,32 +694,63 @@ app.post('/api/open-popup-tab', async (req, res) => {
       });
       page = await browser.newPage();
 
-      await page.goto('https://ppe-mall-management.lotuss.com/Simplicity-uat/apptop.aspx', {
+      // 1) Load landing
+      console.log('[Login] Navigating to apptop.aspx');
+      await page.goto('https://mall-management.lotuss.com/Simplicity/apptop.aspx', {
         waitUntil: 'networkidle2',
       });
 
-      await page.type('#login_UserName', 'TH40184213');
-      await page.type('#login_Password', 'P@ssword12345');
+      // 2) Click “Click to go to the login page”
+      console.log('[Login] Waiting for Go-to-login button');
+      await page.waitForSelector('#lblToLoginPage', { timeout: 20000 });
+      console.log('[Login] Clicking Go-to-login');
+      await page.click('#lblToLoginPage');
+      await new Promise(r => setTimeout(r, 5000));
 
+      // 3) Username + Continue
+      console.log('[Login] Waiting for username field');
+      await page.waitForSelector('input#username', { timeout: 20000 });
+      console.log('[Login] Typing username');
+      await page.type('input#username', 'TH40184213', { delay: 50 });
+      const cont1 = '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV > div.sc-jzgbtB.bIuYUf > form > div > div:nth-child(3) > div > button';
+      console.log('[Login] Waiting for Continue #1');
+      await page.waitForSelector(cont1, { timeout: 20000 });
+      console.log('[Login] Clicking Continue #1');
+      await page.click(cont1);
+      await new Promise(r => setTimeout(r, 5000));
+
+      // 4) Password + Continue
+      console.log('[Login] Waiting for password field');
+      await page.waitForSelector('input#password', { timeout: 20000 });
+      console.log('[Login] Typing password');
+      await page.type('input#password', 'u@@U5410154', { delay: 50 });
+      const cont2 = '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV > div.sc-jzgbtB.bIuYUf > form > div > div:nth-child(4) > div > button';
+      console.log('[Login] Waiting for Continue #2');
+      await page.waitForSelector(cont2, { timeout: 20000 });
+      console.log('[Login] Clicking Continue #2');
+      await page.click(cont2);
+
+      // 5) Wait for post-login
       await Promise.all([
-        page.click('#login_Login'),
-        page.waitForNavigation({ waitUntil: 'networkidle2' }),
-      ]);
+        page.waitForNavigation({ waitUntil: 'networkidle2' })
+      ]).catch(() => {});
+      await new Promise(r => setTimeout(r, 5000));
 
+      // 6) Verify
       const html = await page.content();
-      const loginSuccessful = !html.includes('Invalid login');
-
-      if (!loginSuccessful) {
+      if (html.includes('Invalid login')) {
+        console.error('[Login] Invalid credentials');
         await browser.close();
-        return res.status(401).json({ success: false, message: 'Invalid credentials during auto login.' });
+        return res.status(401).json({ success: false, message: 'Invalid credentials.' });
       }
 
       browserSessions.set(systemType, { browser, page });
-      console.log('[✅ Login successful via open-popup-tab flow]');
+      console.log('[✅ Login successful]');
     } else {
       ({ browser, page } = browserSessions.get(systemType));
     }
 
+    // --- NAVIGATION & POPUP (unchanged) ---
     console.log('[📂 Navigating to Lease tab]');
     await page.waitForSelector('#menu_MenuLiteralDiv > ul > li:nth-child(10) > a', { timeout: 10000 });
     await page.click('#menu_MenuLiteralDiv > ul > li:nth-child(10) > a');
@@ -679,9 +762,7 @@ app.post('/api/open-popup-tab', async (req, res) => {
     });
     await new Promise(r => setTimeout(r, 2000));
 
-    // 🔀 Conditional navigation
     const menuToClick = contractNumber.includes('LR') ? 'Lease Renewal' : 'Lease Offer';
-
     const clicked = await page.evaluate((menuText) => {
       const target = [...document.querySelectorAll('a')].find(a => a.textContent.trim() === menuText);
       if (target) { target.click(); return true; }
@@ -690,26 +771,14 @@ app.post('/api/open-popup-tab', async (req, res) => {
 
     if (!clicked) throw new Error(`❌ Could not click ${menuToClick}`);
     console.log(`[📎 Clicked submenu: ${menuToClick}]`);
-    // Wait longer after clicking Lease Renewal to allow iframe content to load
-    if (menuToClick === 'Lease Renewal') {
-      console.log('[⏳ Waiting longer for Lease Renewal page to load]');
-      await new Promise(resolve => setTimeout(resolve, 8000));
-        } else {
-          await new Promise(resolve => setTimeout(resolve, 5000)); // Usual wait for Lease Offer
-    }
+    await new Promise(r => setTimeout(r, menuToClick === 'Lease Renewal' ? 8000 : 5000));
 
-    // Re-fetch iframe after navigation
     const iframeHandle = await page.waitForSelector('iframe[name="frameBottom"]', { timeout: 70000 });
     const frame = await iframeHandle.contentFrame();
-
-    // Ensure the search bar is available
     await frame.waitForSelector('#panel_SimpleSearch_c1', { visible: true });
-
-    await frame.waitForSelector('#panel_SimpleSearch_c1', { visible: true });
-    await frame.evaluate((contract) => {
+    await frame.evaluate((cn) => {
       const input = document.querySelector('#panel_SimpleSearch_c1');
-      input.value = contract;
-      input.focus();
+      input.value = cn; input.focus();
     }, contractNumber);
 
     await frame.waitForSelector('a#panel_buttonSearch_bt', { visible: true });
@@ -731,15 +800,16 @@ app.post('/api/open-popup-tab', async (req, res) => {
 
     if (popup) {
       await popup.bringToFront();
-      console.log('[✅ Popup tab opened and brought to front]');
+      console.log('[✅ Popup tab opened]');
     } else {
-      console.warn('[⚠️ Popup tab not detected, may still be opening...]');
+      console.warn('[⚠️ Popup tab not detected]');
     }
 
-    res.json({ success: true, message: `Popup triggered for ${menuToClick}. Please check Chrome tab.` });
+    return res.json({ success: true, message: `Popup triggered for ${menuToClick}.` });
+
   } catch (err) {
     console.error('[❌ /api/open-popup-tab error]', err);
-    res.status(500).json({ message: err.message });
+    return res.status(500).json({ message: err.message });
   }
 });
 
@@ -748,54 +818,83 @@ app.post('/api/open-popup-tab', async (req, res) => {
 app.post('/api/scrape-login', async (req, res) => {
   const { systemType, username, password } = req.body;
 
+  // No‐op for “others”
   if (!systemType || systemType === 'others') {
     return res.status(200).json({ success: true, message: 'No login required for Others.' });
   }
 
   try {
+    let browser, page;
+
+    // 1) Reuse session if we already have one
     if (browserSessions.has(systemType)) {
-      const old = browserSessions.get(systemType);
-      await old.browser.close();
+      ({ browser, page } = browserSessions.get(systemType));
+    } else {
+      // 2) Launch fresh browser + page
+      browser = await puppeteer.launch({ headless: false });
+      page = await browser.newPage();
+
+      // 3) Go to the Simplicity landing page
+      await page.goto(
+        'https://mall-management.lotuss.com/Simplicity/apptop.aspx',
+        { waitUntil: 'networkidle2' }
+      );
+
+      // 4) Click “Click to go to the login page” + wait for it to load
+      await page.waitForSelector('#lblToLoginPage', { visible: true, timeout: 20000 });
+      await Promise.all([
+        page.click('#lblToLoginPage'),
+        page.waitForNavigation({ waitUntil: 'networkidle2' })
+      ]);
+
+      // 5) Enter username and Continue
+      await page.waitForSelector('input#username', { visible: true, timeout: 20000 });
+      await page.type('input#username', username, { delay: 50 });
+
+      const continueSel1 =
+        '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV ' +
+        '> div.sc-jzgbtB.bIuYUf > form > div > div:nth-child(3) > div > button';
+      await page.waitForSelector(continueSel1, { visible: true, timeout: 20000 });
+      await page.click(continueSel1);
+
+      // 6) Enter password and Continue
+      await page.waitForSelector('input#password', { visible: true, timeout: 20000 });
+      await page.type('input#password', password, { delay: 50 });
+
+      const continueSel2 =
+        '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV ' +
+        '> div.sc-jzgbtB.bIuYUf > form > div > div:nth-child(4) > div > button';
+      await page.waitForSelector(continueSel2, { visible: true, timeout: 20000 });
+      await Promise.all([
+        page.click(continueSel2),
+        page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {})
+      ]);
+
+      // small extra buffer
+      await new Promise(r => setTimeout(r, 10000));
+
+      // 7) Verify login succeeded
+      const html = await page.content();
+      if (html.includes('Invalid login')) {
+        await browser.close();
+        return res.status(401).json({ success: false, message: 'Invalid credentials' });
+      }
+
+      // 8) Store for reuse
+      browserSessions.set(systemType, { browser, page });
     }
 
-    const browser = await puppeteer.launch({ headless: false });
-    const page = await browser.newPage();
+    console.log(`[LOGIN] Simplicity login successful for ${username}`);
+    return res.json({ success: true });
 
-    await page.goto('https://ppe-mall-management.lotuss.com/Simplicity-uat/apptop.aspx', {
-      waitUntil: 'networkidle2',
-    });
-
-    await page.type('#login_UserName', username);
-    await page.type('#login_Password', password);
-
-    await Promise.all([
-      page.click('#login_Login'),
-      page.waitForNavigation({ waitUntil: 'networkidle2' }),
-    ]);
-
-    const html = await page.content();
-    const loginSuccessful = !html.includes('Invalid login');
-    console.log(`[LOGIN] Simplicity login triggered for ${username}`);
-    if (!loginSuccessful) {
-      await browser.close();
-      return res.status(401).json({ success: false, message: 'Invalid credentials' });
-    }
-
-    browserSessions.set(systemType, { browser, page });
-    console.log('[Simplicity] Login successful.');
-    return res.json({ success: true }); // ✅ No navigation or clicks here
-    
   } catch (err) {
-    console.error('Login error:', err);
-    return res.status(500).json({ success: false, message: 'Login failed', error: err.message });
+    console.error('[SCRAPE-LOGIN Error]', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Login failed',
+      error: err.message
+    });
   }
-  console.log(`[SCRAPE] Starting scrape for contract: ${contractNumber}`);
-console.log(`[SCRAPE] Puppeteer navigating...`);
-console.log(`[SCRAPE] View icon clicked, waiting for popup...`);
-console.log(`[SCRAPE] Popup loaded. Expanding all tabs...`);
-console.log(`[SCRAPE] Extracting text from popup window...`);
-console.log(`[SCRAPE] Scraping complete. Returning data.`);
-  
 });
 
 
@@ -946,55 +1045,240 @@ app.post('/api/store-compare-result', async (req, res) => {
 
 //Web validation
 app.post('/api/web-validate', async (req, res) => {
-  try {
-    const { contractNumber, extractedData, promptKey = 'default' } = req.body;
+  const { contractNumber, extractedData, promptKey = 'default' } = req.body;
+  if (!contractNumber || !extractedData || typeof extractedData !== 'object') {
+    console.error('[Web Validation] Missing or invalid input:', req.body);
+    return res.status(400).json({ message: 'Missing contractNumber or invalid extractedData' });
+  }
 
-    if (!contractNumber || !extractedData || typeof extractedData !== 'object') {
-      console.error('[Web Validation] Missing or invalid input:', req.body);
-      return res.status(400).json({ message: 'Missing contractNumber or invalid extractedData' });
+  try {
+    // ─── 1) LOGIN / SESSION SETUP ─────────────────────────────────
+    const systemType = 'simplicity';
+    let browser, page;
+
+    if (browserSessions.has(systemType)) {
+      ({ browser, page } = browserSessions.get(systemType));
+      console.log('[LOGIN] Reusing existing Simplicity session');
+    } else {
+      console.log('[LOGIN] No session—launching new full-screen browser');
+      browser = await puppeteer.launch({
+        headless: false,
+        defaultViewport: null,
+        args: ['--start-fullscreen']
+      });
+      page = await browser.newPage();
+      await page.setViewport({ width: 1920, height: 1080 });
+
+      console.log('[LOGIN] Navigating to landing page');
+      await page.goto('https://mall-management.lotuss.com/Simplicity/apptop.aspx', {
+        waitUntil: 'networkidle2'
+      });
+
+      console.log('[LOGIN] clicking “go to login”');
+      await page.waitForSelector('#lblToLoginPage', { visible: true, timeout: 20000 });
+      await Promise.all([
+        page.click('#lblToLoginPage'),
+        page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {})
+      ]);
+
+      console.log('[LOGIN] entering username');
+      await page.waitForSelector('input#username', { visible: true, timeout: 20000 });
+      await page.type('input#username', 'TH40184213', { delay: 50 });
+
+      const continueSel1 =
+        '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV ' +
+        '> div.sc-jzgbtB.bIuYUf > form > div > div:nth-child(3) > div > button';
+      console.log('[LOGIN] clicking Continue after username');
+      await page.waitForSelector(continueSel1, { visible: true, timeout: 20000 });
+      await page.click(continueSel1);
+
+      console.log('[LOGIN] entering password');
+      await page.waitForSelector('input#password', { visible: true, timeout: 20000 });
+      await page.type('input#password', 'u@@U5410154', { delay: 50 });
+
+      const continueSel2 =
+        '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV ' +
+        '> div.sc-jzgbtB.bIuYUf > form > div > div:nth-child(4) > div > button';
+      console.log('[LOGIN] clicking Continue after password');
+      await Promise.all([
+        page.click(continueSel2),
+        page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {})
+      ]);
+
+      console.log('[LOGIN] waiting for UI to settle');
+      await new Promise(r => setTimeout(r, 10000));
+
+      const postLoginHtml = await page.content();
+      if (postLoginHtml.includes('Invalid login')) {
+        console.error('[LOGIN] invalid credentials');
+        await browser.close();
+        return res.status(401).json({ success: false, message: 'Invalid credentials' });
+      }
+
+      console.log('[LOGIN] success');
+      browserSessions.set(systemType, { browser, page });
     }
 
-    // === Load Validation Prompt Template ===
+    // ─── 2) GEMINI-BASED WEB VALIDATION ─────────────────────────────
     const promptFilePath = path.join(__dirname, 'prompts', 'LOI_Sim_validation.txt');
     if (!fs.existsSync(promptFilePath)) {
+      console.error('[VALIDATION] prompt file missing');
       return res.status(400).json({ message: 'Validation prompt file not found.' });
     }
-
     const promptTemplate = fs.readFileSync(promptFilePath, 'utf8');
     const finalPrompt = `${promptTemplate}\n\nExtracted Data:\n${JSON.stringify(extractedData, null, 2)}`;
 
-    // === Send to Gemini ===
-    const geminiRes = await model.generateContent(finalPrompt);
-    const geminiText = await geminiRes.response.text();
-
-    // === Clean Gemini output ===
-    let cleaned = geminiText.trim();
-    if (cleaned.startsWith('```json')) cleaned = cleaned.slice(7);
-    if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3);
+    console.log('[Web Validation] sending to Gemini');
+    const gemRes = await model.generateContent(finalPrompt);
+    let gemText = (await gemRes.response.text()).trim();
+    if (gemText.startsWith('```json')) gemText = gemText.slice(7);
+    if (gemText.endsWith('```'))      gemText = gemText.slice(0, -3);
 
     let parsedResult;
     try {
-      parsedResult = JSON.parse(cleaned);
-      if (!Array.isArray(parsedResult)) {
-        throw new Error('Expected validation result to be an array');
-      }
+      parsedResult = JSON.parse(gemText);
+      if (!Array.isArray(parsedResult)) throw new Error('Expected an array');
     } catch (err) {
-      console.error('[❌ Web Validation Parsing Error]', err);
-      return res.status(500).json({ message: 'Failed to parse Gemini web validation output', raw: geminiText });
+      console.error('[Web Validation] parse error', err);
+      return res.status(500).json({ message: 'Failed to parse Gemini output', raw: gemText });
+    }
+    console.log('[Web Validation] parsed result:', parsedResult);
+
+    // ─── extract workflow status from parsedResult ────────────────
+    const wfItem = parsedResult.find(
+      row => row.field && row.field.toLowerCase() === 'workflow status'
+    );
+    const workflowStatus = wfItem ? wfItem.value : null;
+    console.log('[Web Validation] workflow_status =', workflowStatus);
+
+    // ─── 3) OPTIONAL “Meter” SCRAPE + GEMINI CHECK ─────────────────
+    let utilityRaw = null;
+    let meterValidation = null;
+
+    if (extractedData['Include Utility'] === 'Yes' && contractNumber.includes('LO')) {
+      console.log('[Utility] Include Utility=Yes & LO… → scraping Meter…');
+
+      try {
+        // 3.1 scroll so the Utilities button is visible
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        console.log('[Utility] scrolled down');
+        await new Promise(r => setTimeout(r, 2000));
+
+        // 3.2 click Utilities top-menu
+        const utilSel = '#menu_MenuLiteralDiv > ul > li:nth-child(22) > a > div.cssmenu-item-label';
+        console.log('[Utility] clicking Utilities top-menu');
+        await page.waitForSelector(utilSel, { visible: true, timeout: 20000 });
+        await page.click(utilSel);
+
+        // 3.3 hover to expand submenu
+        console.log('[Utility] hovering Utilities submenu');
+        await page.evaluate(() => {
+          const li = document.querySelector('#menu_MenuLiteralDiv > ul > li:nth-child(22)');
+          li?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+        });
+        await new Promise(r => setTimeout(r, 10000));
+
+        // 3.4 click “Meter” submenu
+        console.log('[Utility] clicking Meter submenu');
+        const clickedMeter = await page.evaluate(() => {
+          const menu = document.querySelector('#menu_MenuLiteralDiv > ul > li:nth-child(22) ul');
+          if (!menu) return false;
+          const a = Array.from(menu.querySelectorAll('a'))
+            .find(x => x.textContent.trim() === 'Meter');
+          if (a) { a.click(); return true; }
+          return false;
+        });
+        if (!clickedMeter) throw new Error('Could not click Meter submenu');
+        console.log('[Utility] Meter submenu clicked');
+
+        // 3.5 wait & switch to bottom iframe
+        await new Promise(r => setTimeout(r, 10000));
+        const frameHandle = await page.waitForSelector('iframe[name="frameBottom"]', { timeout: 20000 });
+        const frame = await frameHandle.contentFrame();
+       
+        await new Promise(r => setTimeout(r, 10000));
+// ─── 3.6 Combined Unit ID + Building ID search ────────────────────
+console.log('[Utility] preparing combined Unit ID + Building ID search');
+
+// wait for the main search box
+await frame.waitForSelector('#panel_SimpleSearch_c1', { visible: true, timeout: 20000 });
+
+// pull the 4-digit Building ID from your parsedResult
+const buildingRow = parsedResult.find(r => r.field === 'Building ID');
+const buildingId = buildingRow?.value || '';
+console.log('[Utility] fetched Building ID:', buildingId);
+
+// build the combined search string
+const unitId = extractedData['Unit ID'] || '';
+const combinedSearch = buildingId
+  ? `${unitId} ${buildingId}`
+  : unitId;
+
+console.log('[Utility] entering combined search:', combinedSearch);
+
+// clear & type the combined string
+await frame.click('#panel_SimpleSearch_c1', { clickCount: 3 });
+await frame.type('#panel_SimpleSearch_c1', combinedSearch, { delay: 50 });
+
+// click the initial Search button
+console.log('[Utility] clicking Search');
+await frame.evaluate(() => {
+  const btn = document.querySelector('a#panel_buttonSearch_bt');
+  btn?.click();
+});
+await new Promise(r => setTimeout(r, 15000));
+
+// scrape immediately
+utilityRaw = await frame.evaluate(() => document.body.innerText);
+console.log('[Utility] scraped raw after combined search:', utilityRaw);
+
+
+        // 3.8 run Gemini on that Meter page
+        const meterPromptPath = path.join(__dirname, 'prompts', 'meter_check.txt');
+        if (fs.existsSync(meterPromptPath)) {
+          const meterTemplate = fs.readFileSync(meterPromptPath, 'utf8');
+          const meterPrompt = `${meterTemplate}\n\nMeter page content:\n${utilityRaw}`;
+          console.log('[Meter Validation] sending to Gemini');
+          const mRes = await model.generateContent(meterPrompt);
+          let mText = (await mRes.response.text()).trim();
+          if (mText.startsWith('```json')) mText = mText.slice(7);
+          if (mText.endsWith('```'))      mText = mText.slice(0, -3);
+
+          try {
+            meterValidation = JSON.parse(mText);
+            console.log('[Meter Validation] parsed:', meterValidation);
+          } catch (e) {
+            console.error('[Meter Validation] parse failed', e);
+          }
+        } else {
+          console.warn('[Meter Validation] prompt file missing, skipping');
+        }
+      } catch (err) {
+        console.error('[Utility] scrape failed, continuing:', err);
+      }
     }
 
-    // === Save to Firebase ===
+    // ─── 4) SAVE TO FIRESTORE ─────────────────────────────────────
     const docId = contractNumber.replace(/\//g, '_');
     await db.collection('compare_result').doc(docId).set({
       web_validation_result: parsedResult,
+      workflow_status: workflowStatus,
+      utility_scrape: utilityRaw,
+      meter_validation_result: meterValidation,
       updated_at: new Date()
     }, { merge: true });
 
-    console.log(`[🔥 compare_result] Web validation result saved for: ${docId}`);
-    res.json({ success: true, validationResult: parsedResult });
+    console.log(`[🔥] Web + utility + meter validation saved for ${docId}`);
+    return res.json({
+      success: true,
+      validationResult: parsedResult,
+      workflowStatus,
+      utilityRaw,
+      meterValidation
+    });
   } catch (err) {
     console.error('[❌ /api/web-validate Error]', err);
-    res.status(500).json({ message: 'Web validation failed', error: err.message });
+    return res.status(500).json({ message: 'Web validation failed', error: err.message });
   }
 });
 
@@ -1013,18 +1297,250 @@ app.post('/api/validate-document', async (req, res) => {
     if (!fs.existsSync(promptFilePath)) {
       return res.status(400).json({ message: 'Validation prompt file not found.' });
     }
-
     const promptTemplate = fs.readFileSync(promptFilePath, 'utf8');
-    const finalPrompt = `${promptTemplate}\n\nExtracted Data:\n${JSON.stringify(extractedData, null, 2)}`;
 
-    // === Send to Gemini ===
+    // === 1) Read Master_9_cell.xlsx and determine if Building ID is present ===
+    const masterExcelPath = path.join(__dirname, 'prompts', 'Master_9_cell.xlsx');
+    let masterData = [];
+    let firstColumnHeader = null;
+    const buildingId = extractedData['Building ID'];
+    req.buildingIdFoundInExcel = false;
+
+    if (fs.existsSync(masterExcelPath)) {
+      console.log('[Validation] Found Master_9_cell.xlsx; reading...');
+      try {
+        const workbook = xlsx.readFile(masterExcelPath);
+        const firstSheetName = workbook.SheetNames[0];
+        masterData = xlsx.utils.sheet_to_json(workbook.Sheets[firstSheetName]);
+        console.log('[Validation] Master_9_cell.xlsx contents (first 5 rows):', masterData.slice(0, 5));
+
+        if (masterData.length > 0) {
+          firstColumnHeader = Object.keys(masterData[0])[0];
+          console.log('[Validation] Detected first column header (column A):', firstColumnHeader);
+        }
+
+        if (buildingId && firstColumnHeader) {
+          const found = masterData.some(row => {
+            const cellValue = row[firstColumnHeader];
+            return (
+              cellValue !== undefined &&
+              String(cellValue).trim() === String(buildingId).trim()
+            );
+          });
+          req.buildingIdFoundInExcel = found;
+          console.log(
+            found
+              ? `[Validation] Building ID "${buildingId}" FOUND in Master_9_cell.xlsx.`
+              : `[Validation] Building ID "${buildingId}" NOT FOUND in Master_9_cell.xlsx.`
+          );
+        } else {
+          if (!buildingId) {
+            console.warn('[Validation] extractedData["Building ID"] is missing; skipping Excel lookup.');
+          } else {
+            console.warn('[Validation] Could not determine first column header; skipping Excel lookup.');
+          }
+        }
+      } catch (excelErr) {
+        console.error('[Validation] Error reading Master_9_cell.xlsx:', excelErr);
+        req.buildingIdFoundInExcel = false;
+      }
+    } else {
+      console.warn('[Validation] Master_9_cell.xlsx not found; skipping Excel lookup.');
+      req.buildingIdFoundInExcel = false;
+    }
+
+    // === 2) Extract deposit-related fields and validate deposit ===
+    const rawRate = extractedData['Monthly rental rate'];
+    const rawDeposit = extractedData['Total Property Deposit'];
+    const rawContractNumber = extractedData['Contract number'];
+    const tenantSelection = extractedData['Tenant Selection'];
+
+    const parseNumber = str => {
+      if (typeof str === 'number') return str;
+      if (typeof str !== 'string') return NaN;
+      return parseFloat(str.replace(/[^0-9.]/g, '')) || NaN;
+    };
+
+    const rate = parseNumber(rawRate);
+    const deposit = parseNumber(rawDeposit);
+    let depositValid = true;
+    let depositReason = '';
+
+    // Helper to ignore decimals
+    const roundIgnoreDecimal = num => Math.floor(num);
+
+    const isLO = typeof rawContractNumber === 'string' && rawContractNumber.includes('LO');
+    const isTenantNo = String(tenantSelection).trim().toLowerCase() === 'no';
+    const buildingFound = Boolean(req.buildingIdFoundInExcel);
+
+    if (isLO && isTenantNo) {
+      // Exception 2: LO + Tenant Selection = No → requires 4×
+      const expected = roundIgnoreDecimal(rate * 4);
+      if (roundIgnoreDecimal(deposit) < expected) {
+        depositValid = false;
+        depositReason = `Contract Number contains LO and Tenant Selection = No; Total Property Deposit (${deposit}) is less than 4 × Monthly rental rate (${rate} × 4 = ${expected}).`;
+      } else {
+        depositValid = true;
+        depositReason = `Contract Number contains LO and Tenant Selection = No; ${deposit} ≥ 4 × ${rate} (ignoring decimals).`;
+      }
+      console.log('[Validation] Deposit check (Exception 2):', depositReason);
+
+    } else if (buildingFound) {
+      // Exception 1: Building ID found → requires 2×
+      const expected = roundIgnoreDecimal(rate * 2);
+      if (roundIgnoreDecimal(deposit) < expected) {
+        depositValid = false;
+        depositReason = `Building ID ${buildingId} found in Master_9_cell.xlsx; Total Property Deposit (${deposit}) is less than 2 × Monthly rental rate (${rate} × 2 = ${expected}).`;
+      } else {
+        depositValid = true;
+        depositReason = `Building ID ${buildingId} found in Master_9_cell.xlsx; ${deposit} ≥ 2 × ${rate} (ignoring decimals).`;
+      }
+      console.log('[Validation] Deposit check (Exception 1):', depositReason);
+
+    } else {
+      // Default rule: requires 3×
+      const expected = roundIgnoreDecimal(rate * 3);
+      if (roundIgnoreDecimal(deposit) < expected) {
+        depositValid = false;
+        depositReason = `Total Property Deposit (${deposit}) is less than 3 × Monthly rental rate (${rate} × 3 = ${expected}).`;
+      } else {
+        depositValid = true;
+        depositReason = `Total Property Deposit (${deposit}) ≥ 3 × Monthly rental rate (${rate} × 3 = ${expected}).`;
+      }
+      console.log('[Validation] Deposit check (Default 3×):', depositReason);
+    }
+
+    // Attach the deposit check result
+    req.depositValidation = {
+      field: 'Total Property Deposit',
+      value: rawDeposit,
+      valid: depositValid,
+      reason: depositReason
+    };
+
+    // === 3) Read Master_PT.xlsx and validate Lease property tax rate ===
+    const taxExcelPath = path.join(__dirname, 'prompts', 'Master_PT.xlsx');
+    let ptData = [];
+    let brandList = [];
+    const brandNameRaw = extractedData['Brand Name'];
+    const rawTaxRate = extractedData['Lease property tax rate'];
+    const taxRate = parseNumber(rawTaxRate);
+    let taxValid = true;
+    let taxReason = '';
+
+    if (fs.existsSync(taxExcelPath)) {
+      console.log('[Validation] Found Master_PT.xlsx; reading...');
+      try {
+        const wbPT = xlsx.readFile(taxExcelPath);
+        const ptSheetName = wbPT.SheetNames[0];
+        ptData = xlsx.utils.sheet_to_json(wbPT.Sheets[ptSheetName]);
+        console.log('[Validation] Master_PT.xlsx contents (first 5 rows):', ptData.slice(0, 5));
+
+        if (ptData.length > 0) {
+          const secondColumnHeader = Object.keys(ptData[0])[1];
+          console.log('[Validation] Detected second column header (column B):', secondColumnHeader);
+          brandList = ptData.map(row => row[secondColumnHeader]).filter(v => v !== undefined && v !== null);
+        }
+
+        let foundInPT = false;
+        if (brandNameRaw && brandList.length > 0) {
+          foundInPT = brandList.some(b =>
+            String(b).trim().toLowerCase() === String(brandNameRaw).trim().toLowerCase()
+          );
+        }
+
+        if (foundInPT) {
+          if (taxRate === 0) {
+            taxValid = true;
+            taxReason = `Brand Name "${brandNameRaw}" found in Master_PT.xlsx; Lease property tax rate (${taxRate}) is zero.`;
+          } else {
+            taxValid = false;
+            taxReason = `Brand Name "${brandNameRaw}" found in Master_PT.xlsx; Lease property tax rate (${taxRate}) must be zero.`;
+          }
+          console.log('[Validation] Tax check (Brand in PT list):', taxReason);
+        } else {
+          console.log(
+            `[Validation] Brand Name "${brandNameRaw}" NOT FOUND in Master_PT.xlsx; no tax check required.`
+          );
+          taxValid = true;
+          taxReason = `Brand Name "${brandNameRaw}" not found in Master_PT.xlsx; no tax check required.`;
+        }
+      } catch (ptErr) {
+        console.error('[Validation] Error reading Master_PT.xlsx:', ptErr);
+        taxValid = true;
+        taxReason = 'Error reading Master_PT.xlsx; skipping tax check.';
+      }
+    } else {
+      console.warn('[Validation] Master_PT.xlsx not found; skipping tax lookup.');
+      taxValid = true;
+      taxReason = 'Master_PT.xlsx not found; skipping tax check.';
+    }
+
+    // Attach the tax check result
+    req.taxValidation = {
+      field: 'Lease property tax rate',
+      value: rawTaxRate,
+      valid: taxValid,
+      reason: taxReason
+    };
+
+    // === 4) Build a modified prompt for Gemini that accounts for skips if needed ===
+    let modifiedPromptTemplate = promptTemplate;
+
+    // If Building ID not found, tell Gemini to skip deposit check
+    if (!req.buildingIdFoundInExcel) {
+      console.log(
+        `[Validation] Overriding deposit rule because Building ID "${buildingId}" was not found in Master_9_cell.xlsx.`
+      );
+      modifiedPromptTemplate =
+        `NOTE: Building ID "${buildingId}" was NOT found in Master_9_cell.xlsx. Skip the “Total Property Deposit” check entirely.\n\n` +
+        promptTemplate;
+    } else {
+      console.log(
+        `[Validation] Leaving deposit rule in place (Building ID "${buildingId}" was found).`
+      );
+    }
+
+    // If Brand Name not found in PT, tell Gemini to skip tax check
+    const brandFoundInPT = !taxReason.includes('not found');
+    if (!brandFoundInPT) {
+      console.log(
+        `[Validation] Overriding tax rule because Brand Name "${brandNameRaw}" was not found in Master_PT.xlsx.`
+      );
+      modifiedPromptTemplate =
+        `NOTE: Brand Name "${brandNameRaw}" was NOT found in Master_PT.xlsx. Skip the “Lease property tax rate” check entirely.\n\n` +
+        modifiedPromptTemplate;
+    } else {
+      console.log(
+        `[Validation] Leaving tax rule in place (Brand Name "${brandNameRaw}" was found).`
+      );
+    }
+
+    // === 5) Final Gemini prompt and send to Gemini ===
+    const finalPrompt =
+      `${modifiedPromptTemplate}\n\nExtracted Data:\n${JSON.stringify(extractedData, null, 2)}`;
+
     const geminiRes = await model.generateContent(finalPrompt);
-    const geminiText = await geminiRes.response.text();
+    let geminiText = (await geminiRes.response.text()).trim();
 
-    res.json({ validation: geminiText.trim() });
+    // === 6) Strip any ```json fences if present ===
+    if (geminiText.startsWith('```json')) {
+      geminiText = geminiText.slice(7);
+    }
+    if (geminiText.endsWith('```')) {
+      geminiText = geminiText.slice(0, -3);
+    }
+    geminiText = geminiText.trim();
+
+    // === 7) Return deposit-check, tax-check, and Gemini result ===
+    return res.json({
+      validation: geminiText,
+      depositCheck: req.depositValidation,
+      taxCheck: req.taxValidation
+    });
   } catch (err) {
     console.error('[Validation Error]', err);
-    res.status(500).json({ message: 'Validation failed', error: err.message });
+    return res.status(500).json({ message: 'Validation failed', error: err.message });
   }
 });
 
@@ -1046,80 +1562,137 @@ function sanitizeJson(data) {
 
 app.post('/api/refresh-contract-status', async (req, res) => {
   const { contractNumber } = req.body;
-  if (!contractNumber) return res.status(400).json({ message: 'Missing contractNumber' });
+  if (!contractNumber) {
+    return res.status(400).json({ message: 'Missing contractNumber' });
+  }
 
   try {
     const systemType = 'simplicity';
     let browser, page;
 
-    if (!browserSessions.has(systemType)) {
+    // ─── 1) LOGIN / SESSION SETUP ─────────────────────────────
+    if (browserSessions.has(systemType)) {
+      ({ browser, page } = browserSessions.get(systemType));
+      console.log('[REFRESH] Reusing existing session');
+    } else {
+      console.log('[REFRESH] No session — performing login');
+      // mirror your check-contract-status login logic here
       browser = await puppeteer.launch({ headless: false });
       page = await browser.newPage();
+      console.log('[REFRESH] goto landing page');
+      await page.goto('https://mall-management.lotuss.com/Simplicity/apptop.aspx', { waitUntil: 'networkidle2' });
 
-      await page.goto('https://ppe-mall-management.lotuss.com/Simplicity-uat/apptop.aspx', { waitUntil: 'networkidle2' });
-      await page.type('#login_UserName', 'TH40184213');
-      await page.type('#login_Password', 'P@ssword12345');
+      console.log('[REFRESH] click “go to login”');
+      await page.waitForSelector('#lblToLoginPage', { visible: true, timeout: 20000 });
       await Promise.all([
-        page.click('#login_Login'),
-        page.waitForNavigation({ waitUntil: 'networkidle2' }),
+        page.click('#lblToLoginPage'),
+        page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}),
       ]);
 
+      console.log('[REFRESH] enter username');
+      await page.waitForSelector('input#username', { visible: true, timeout: 20000 });
+      await page.type('input#username', 'TH40184213', { delay: 50 });
+      const cont1 = '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV > div.sc-jzgbtB.bIuYUf > form > div > div:nth-child(3) > div > button';
+      console.log('[REFRESH] click username Continue');
+      await page.waitForSelector(cont1, { visible: true, timeout: 20000 });
+      await page.click(cont1);
+
+      console.log('[REFRESH] enter password');
+      await page.waitForSelector('input#password', { visible: true, timeout: 20000 });
+      await page.type('input#password', 'u@@U5410154', { delay: 50 });
+      const cont2 = '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV > div.sc-jzgbtB.bIuYUf > form > div > div:nth-child(4) > div > button';
+      console.log('[REFRESH] click password Continue');
+      await Promise.all([
+        page.click(cont2),
+        page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}),
+      ]);
+
+      console.log('[REFRESH] login settled');
+      await new Promise(r => setTimeout(r, 10000));
+
+      const postLogin = await page.content();
+      if (postLogin.includes('Invalid login')) {
+        console.error('[REFRESH] Invalid credentials');
+        await browser.close();
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+
+      console.log('[REFRESH] login success');
       browserSessions.set(systemType, { browser, page });
-    } else {
-      ({ browser, page } = browserSessions.get(systemType));
     }
 
-    // Navigate to Lease → LO or LR submenu
-    const isLeaseOffer = contractNumber.includes('LO');
-    const submenuText = isLeaseOffer ? 'Lease Offer' : 'Lease Renewal';
+    // ─── 2) RELOAD / RESET FRAMEWORK ────────────────────────────
+    console.log('[REFRESH] reloading landing page to clear old frames');
+    await page.goto('https://mall-management.lotuss.com/Simplicity/apptop.aspx', { waitUntil: 'networkidle2' });
+    await new Promise(r => setTimeout(r, 2000));
 
-    await page.click('#menu_MenuLiteralDiv > ul > li:nth-child(10) > a');
-    await new Promise(r => setTimeout(r, 500));
-    await page.evaluate((submenuText) => {
-      const menu = [...document.querySelectorAll('a')].find(a => a.textContent.trim() === submenuText);
-      if (menu) menu.click();
+    // ─── 3) NAVIGATE TO LEASE → SUBMENU ────────────────────────
+    console.log('[REFRESH] clicking Lease top menu');
+    const leaseTop = '#menu_MenuLiteralDiv > ul > li:nth-child(10) > a';
+    await page.waitForSelector(leaseTop, { visible: true, timeout: 15000 });
+    await page.click(leaseTop);
+
+    console.log('[REFRESH] hover Lease to expand');
+    await page.evaluate(() => {
+      const el = [...document.querySelectorAll('a')].find(a => a.textContent.trim() === 'Lease');
+      if (el) el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+    await new Promise(r => setTimeout(r, 2000));
+
+    const isOffer = contractNumber.includes('LO');
+    const submenuText = isOffer ? 'Lease Offer' : 'Lease Renewal';
+    console.log(`[REFRESH] clicking submenu "${submenuText}"`);
+    const ok = await page.evaluate(text => {
+      const link = [...document.querySelectorAll('a')].find(a => a.textContent.trim() === text);
+      if (link) { link.click(); return true; }
+      return false;
     }, submenuText);
+    if (!ok) throw new Error(`Could not click submenu: ${submenuText}`);
+    await new Promise(r => setTimeout(r, 5000));
 
-    await new Promise(r => setTimeout(r, 10000));
-    const iframeHandle = await page.waitForSelector('iframe[name="frameBottom"]', { timeout: 10000 });
+    // ─── 4) RE-ACQUIRE IFRAME & EXTRACT STATUS ─────────────────
+    console.log('[REFRESH] waiting for search iframe');
+    const iframeHandle = await page.waitForSelector('iframe[name="frameBottom"]', { visible: true, timeout: 20000 });
     const frame = await iframeHandle.contentFrame();
+    if (!frame) throw new Error('Could not get contentFrame()');
 
-    await frame.waitForSelector('#panel_SimpleSearch_c1');
-    await frame.evaluate((contract) => {
-      const input = document.querySelector('#panel_SimpleSearch_c1');
-      input.value = contract;
-      input.focus();
+    console.log('[REFRESH] entering contract number');
+    await frame.waitForSelector('#panel_SimpleSearch_c1', { visible: true, timeout: 15000 });
+    await frame.evaluate((cn) => {
+      const inp = document.querySelector('#panel_SimpleSearch_c1');
+      inp.value = cn;
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
     }, contractNumber);
 
-    await frame.evaluate(() => {
-      document.querySelector('a#panel_buttonSearch_bt')?.click();
-    });
+    console.log('[REFRESH] clicking search');
+    await frame.waitForSelector('a#panel_buttonSearch_bt', { visible: true, timeout: 10000 });
+    await frame.click('a#panel_buttonSearch_bt');
+    await new Promise(r => setTimeout(r, 5000));
 
-    await new Promise(r => setTimeout(r, 8000));
-
-    // Extract status from the correct column
-    const statusXPath = isLeaseOffer
+    console.log('[REFRESH] extracting status cell');
+    const statusXPath = isOffer
       ? '//*[@id="gridResults_gv"]/tbody/tr[2]/td[13]'
       : '//*[@id="gridResults_gv"]/tbody/tr[2]/td[12]';
-
-    const statusText = await frame.evaluate((xpath) => {
-      const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
-      return result.singleNodeValue ? result.singleNodeValue.textContent.trim() : null;
+    const statusText = await frame.evaluate(xpath => {
+      const r = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+      return r.singleNodeValue?.textContent.trim() ?? null;
     }, statusXPath);
 
-    console.log(`[📘 REFRESH] ${contractNumber} → ${statusText}`);
+    console.log(`[REFRESH] ${contractNumber} → "${statusText}"`);
 
-    // Optional: Update Firestore
+    // ─── 5) SAVE BACK TO FIRESTORE ─────────────────────────────
     const docId = contractNumber.replace(/\//g, '_');
     await db.collection('compare_result').doc(docId).set({
-      refreshed_status: statusText,
-      refreshed_at: new Date(),
+      workflow_status: statusText,
+      updated_at: new Date()
     }, { merge: true });
+    console.log(`[REFRESH] workflow_status updated in Firestore for ${docId}`);
 
-    res.json({ success: true, status: statusText });
+    return res.json({ success: true, status: statusText });
+
   } catch (err) {
-    console.error('[❌ Refresh Status Error]', err);
-    res.status(500).json({ message: 'Failed to refresh contract status', error: err.message });
+    console.error('[REFRESH] Error:', err);
+    return res.status(500).json({ message: 'Failed to refresh contract status', error: err.message });
   }
 });
 
@@ -1253,7 +1826,7 @@ app.post('/api/update-lead-status', async (req, res) => {
     res.status(500).json({ message: 'Failed to update lead status', error: err.message });
   }
 });
-
+/*
 app.post('/api/web-validate', async (req, res) => {
   try {
     const { contractNumber, extractedData, promptKey = 'default' } = req.body;
@@ -1306,6 +1879,7 @@ app.post('/api/web-validate', async (req, res) => {
     res.status(500).json({ message: 'Web validation failed', error: err.message });
   }
 });
+*/
 
 app.get('/api/get-compare-results', async (req, res) => {
   try {
@@ -1348,29 +1922,67 @@ app.get('/api/check-file-exists', async (req, res) => {
 });
 
 // New endpoint to check if the file exists in Firebase (compare_result collection)
+// In your server.js (or wherever your Express routes live):
+
 app.get('/api/check-file-processed', async (req, res) => {
-  const { filename } = req.query; // Get the filename from the query string
-  
+  const { filename } = req.query; // e.g. "5036_LO2502_00060.pdf"
+
   if (!filename) {
     return res.status(400).json({ message: 'Filename is required' });
   }
 
+  // ── 0) Strip “.pdf” (if present) so our regex can match just the contract number ──
+  const baseName = filename.replace(/\.pdf$/i, '');
+
+  // ── 1) Now test: must be digits + "_" + (LO|LR) + digits + "_" + digits ──
+  // e.g. "5036_LO2502_00060"
+  const validPattern = /^\d+_(?:LO|LR)\d+_\d+$/;
+  if (!validPattern.test(baseName)) {
+    // Skip anything that does NOT conform. Return processed:true so caller won’t wait.
+    return res.json({ success: true, processed: true });
+  }
+
   try {
-    const contractNumber = filename.replace(/\//g, '_');  // Format filename (convert slashes to underscores)
+    // 2) We know baseName matches “5036_LO2502_00060”
+    const contractNumber = baseName; // already has no ".pdf"
 
-    // Fetch the document from the 'compare_result' collection
-    const docSnapshot = await db.collection('compare_result').doc(contractNumber).get();
+    // 3) Fetch from Firestore under “compare_result/{contractNumber}”
+    const docSnapshot = await db
+      .collection('compare_result')
+      .doc(contractNumber)
+      .get();
 
-    if (docSnapshot.exists) {
-      // If the document exists, return a success response with true (indicating it's processed)
-      res.json({ success: true, processed: true });
-    } else {
-      // If the document doesn't exist, return a success response with false (indicating it's not processed)
-      res.json({ success: true, processed: false });
+    if (!docSnapshot.exists) {
+      // no document → not yet processed
+      return res.json({ success: true, processed: false });
     }
+
+    // 4) Document exists: grab the three arrays
+    const data = docSnapshot.data();
+    const compareArr = Array.isArray(data.compare_result) ? data.compare_result : null;
+    const webValArr = Array.isArray(data.web_validation_result) ? data.web_validation_result : null;
+    const pdfValArr = Array.isArray(data.validation_result) ? data.validation_result : null;
+
+    if (!compareArr || !webValArr || !pdfValArr) {
+      // any missing → not fully done
+      return res.json({ success: true, processed: false });
+    }
+
+    // 5) Check that every row in compare_result has match === true
+    const allCompareMatch = compareArr.every(row => row.match === true);
+    // 6) Check that every row in web_validation_result has valid === true
+    const allWebValid = webValArr.every(row => row.valid === true);
+    // 7) Check that every row in validation_result has valid === true
+    const allPdfValid = pdfValArr.every(row => row.valid === true);
+
+    const fullyPassed = allCompareMatch && allWebValid && allPdfValid;
+    return res.json({ success: true, processed: fullyPassed });
   } catch (error) {
-    console.error('[❌ Error checking file existence]', error);
-    res.status(500).json({ message: 'Error checking file existence', error: error.message });
+    console.error('[❌ Error in /api/check-file-processed]', error);
+    return res.status(500).json({
+      message: 'Error checking file processed status',
+      error: error.message,
+    });
   }
 });
 
@@ -1409,7 +2021,6 @@ app.post('/api/process-sharepoint-folder', async (req, res) => {
 
 import { processOneContract } from './autoProcessor.js';
 import axios from 'axios';  // To call the /api/check-file-exists endpoint
-import { delayedMove } from './autoProcessor.js';
 
 
 app.post('/api/auto-process-pdf-folder', async (req, res) => {
@@ -1436,12 +2047,20 @@ app.post('/api/auto-process-pdf-folder', async (req, res) => {
 
   for (const file of files) {
     const fileNameWithoutExtension = path.basename(file, '.pdf');
+    const validPattern = /^\d+_(?:LO|LR)\d+_\d+$/;
+    if (!validPattern.test(fileNameWithoutExtension)) {
+      console.log(`[⏭️  Skipping invalid filename] ${fileNameWithoutExtension}`);
+
+      
+
+      // Don’t process this one—go to the next file
+      continue;
+    }
 
     const alreadyProcessed = await checkIfFileExistsInFirebase(fileNameWithoutExtension);
 
     if (alreadyProcessed) {
       console.log(`[❌ Skipping] ${fileNameWithoutExtension} has already been processed.`);
-      await delayedMove(file, SKIPPED_FOLDER); // ✅ Move skipped file as-is
       continue;
     }
 
@@ -1503,10 +2122,12 @@ async function checkIfFileExistsInFirebase(filename) {
     const contractStatus = statusRes.data?.status || '';
 
     console.log(`[STEP 3] 🔍 Contract status = "${contractStatus}"`);
+    /*
     if (contractStatus.trim() !== 'Pending Verification') {
       console.log(`[🚫 Skipping] ${contractNumber} status is not 'Pending Verification'.`);
       return true;
     }
+    */
 
     console.log(`[✅ PASSED] ${contractNumber} ready for processing.`);
     return false;
@@ -1516,91 +2137,202 @@ async function checkIfFileExistsInFirebase(filename) {
   }
 }
 
+app.post('/api/update-verified-status', async (req, res) => {
+  const { contractNumber, verifiedStatus } = req.body;
+  if (!contractNumber || !verifiedStatus) {
+    return res.status(400).json({ message: 'Missing fields' });
+  }
+
+  try {
+    const docId = contractNumber.replace(/\//g, '_');
+    await db.collection('compare_result').doc(docId).set(
+      { verified_status: verifiedStatus },
+      { merge: true }
+    );
+    console.log(`[Firebase] Set verified_status="${verifiedStatus}" for ${docId}`);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[Firestore Error] update-verified-status:', err);
+    return res.status(500).json({ message: err.message });
+  }
+});
+
+
 app.post('/api/check-contract-status', async (req, res) => {
-  const { contractNumber } = req.body;
-  if (!contractNumber) return res.status(400).json({ message: 'Missing contractNumber' });
+  // 1) Read `contractNumber` explicitly from req.body
+  const contractNumber = req.body.contractNumber;
+  if (!contractNumber) {
+    return res.status(400).json({ message: 'Missing contractNumber' });
+  }
+  const validPattern = /^\d+_(?:LO|LR)\d+_\d+$/;
+  if (!validPattern.test(contractNumber)) {
+    // Return “processed” right away so the caller won’t launch Puppeteer
+    return res.json({
+      success: true,
+      status: null,
+      message: 'Skipped: invalid filename format'
+    });
+  }
 
   try {
     const systemType = 'simplicity';
     let browser, page;
 
+    // ─── 1) LOGIN OR RELOAD ─────────────────────────────────────────────────────────────
     if (!browserSessions.has(systemType)) {
+      console.log('[STEP] launching browser/session');
       browser = await puppeteer.launch({ headless: false });
       page = await browser.newPage();
 
-      await page.goto('https://ppe-mall-management.lotuss.com/Simplicity-uat/apptop.aspx', { waitUntil: 'networkidle2' });
-      await page.type('#login_UserName', 'TH40184213');
-      await page.type('#login_Password', 'P@ssword12345');
-      await Promise.all([
-        page.click('#login_Login'),
-        page.waitForNavigation({ waitUntil: 'networkidle2' }),
-      ]);
+      console.log('[STEP] going to apptop.aspx');
+      await page.goto('https://mall-management.lotuss.com/Simplicity/apptop.aspx', { waitUntil: 'networkidle2' });
 
+      console.log('[STEP] waiting for "go to login" button');
+      await page.waitForSelector('#lblToLoginPage', { visible: true, timeout: 20000 });
+      console.log('[STEP] clicking "go to login"');
+      await page.click('#lblToLoginPage');
+
+      console.log('[STEP] waiting 5s for username form');
+      await new Promise(r => setTimeout(r, 5000));
+
+      console.log('[STEP] typing username');
+      await page.waitForSelector('input#username', { visible: true, timeout: 20000 });
+      await page.type('input#username', 'TH40184213', { delay: 50 });
+      const continueSel1 = '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV > div.sc-jzgbtB.bIuYUf > form > div > div:nth-child(3) > div > button';
+      console.log('[STEP] clicking username Continue');
+      await page.waitForSelector(continueSel1, { visible: true, timeout: 20000 });
+      await page.click(continueSel1);
+
+      console.log('[STEP] waiting 5s for password form');
+      await new Promise(r => setTimeout(r, 5000));
+
+      console.log('[STEP] typing password');
+      await page.waitForSelector('input#password', { visible: true, timeout: 20000 });
+      await page.type('input#password', 'u@@U5410154', { delay: 50 });
+      const continueSel2 = '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV > div.sc-jzgbtB.bIuYUf > form > div > div:nth-child(4) > div > button';
+      console.log('[STEP] clicking password Continue');
+      await page.waitForSelector(continueSel2, { visible: true, timeout: 20000 });
+      await page.click(continueSel2);
+
+      console.log('[STEP] waiting 15s for post-login settle');
+      await new Promise(r => setTimeout(r, 15000));
+
+      console.log('[STEP] verifying login succeeded');
+      const html = await page.content();
+      if (html.includes('Invalid login')) {
+        console.log('[ERROR] Invalid credentials');
+        await browser.close();
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+
+      console.log('[STEP] storing session');
       browserSessions.set(systemType, { browser, page });
     } else {
+      console.log('[STEP] reusing existing session');
       ({ browser, page } = browserSessions.get(systemType));
-    }
 
-    // Step 1: Navigate to Lease menu
-    await page.click('#menu_MenuLiteralDiv > ul > li:nth-child(10) > a');
-    await new Promise(r => setTimeout(r, 500));
-    await page.evaluate(() => {
-      const leaseMenu = [...document.querySelectorAll('a')].find(el => el.textContent.trim() === 'Lease');
-      if (leaseMenu) leaseMenu.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-    });
-    await new Promise(r => setTimeout(r, 2000));
-
-    // Step 2: Navigate to submenu
-    const isLeaseOffer = contractNumber.includes('LO');
-    const submenuText = isLeaseOffer ? 'Lease Offer' : 'Lease Renewal';
-    const clicked = await page.evaluate((submenuText) => {
-      const link = [...document.querySelectorAll('a')].find(a => a.textContent.trim() === submenuText);
-      if (link) {
-        link.click();
-        return true;
+      // Close any extra tabs/popups so we start fresh
+      const pagesNow = await browser.pages();
+      for (let i = 1; i < pagesNow.length; i++) {
+        try { await pagesNow[i].close(); } catch {}
       }
-      return false;
-    }, submenuText);
 
-    if (!clicked) {
-      throw new Error(`❌ Could not click submenu: ${submenuText}`);
+      // Reload the landing page to clear old iframes/state
+      await page.goto('https://mall-management.lotuss.com/Simplicity/apptop.aspx', { waitUntil: 'networkidle2' });
+      await page.waitForTimeout(2000);
     }
 
-    await new Promise(r => setTimeout(r, 5000));
-
-    // Step 3: Wait for iframe and search
-    const iframeHandle = await page.waitForSelector('iframe[name="frameBottom"]', { timeout: 15000 });
-    const frame = await iframeHandle.contentFrame();
-
-    await frame.waitForSelector('#panel_SimpleSearch_c1');
-    await frame.evaluate((contract) => {
-      const input = document.querySelector('#panel_SimpleSearch_c1');
-      input.value = contract;
-      input.focus();
-    }, contractNumber);
-
-    await frame.evaluate(() => {
-      const btn = document.querySelector('a#panel_buttonSearch_bt');
-      if (btn) btn.click();
-    });
-
+    // Small buffer before interacting
     await new Promise(r => setTimeout(r, 10000));
 
-    // Step 4: Extract correct status based on submenu type
+    // ─── STATUS CHECK ────────────────────────────────────────────────────────
+    console.log('[STEP] clicking Lease menu');
+    await page.click('#menu_MenuLiteralDiv > ul > li:nth-child(10) > a');
+    console.log('[STEP] hovering Lease submenu');
+    await new Promise(r => setTimeout(r, 5000));
+    await page.evaluate(() => {
+      const leaseMenu = [...document.querySelectorAll('a')].find(el => el.textContent.trim() === 'Lease');
+      leaseMenu?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+    await new Promise(r => setTimeout(r, 10000));
+
+    // Note: `contractNumber` is now safely defined
+    const isLeaseOffer = contractNumber.includes('LO');
+    const submenuText = isLeaseOffer ? 'Lease Offer' : 'Lease Renewal';
+    console.log(`[STEP] clicking submenu "${submenuText}"`);
+    const clicked = await page.evaluate(text => {
+      const link = [...document.querySelectorAll('a')].find(a => a.textContent.trim() === text);
+      if (link) { link.click(); return true; }
+      return false;
+    }, submenuText);
+    if (!clicked) {
+      throw new Error(`Could not click submenu: ${submenuText}`);
+    }
+    await new Promise(r => setTimeout(r, 5000));
+
+    console.log('[STEP] waiting for search iframe');
+    const iframeHandle = await page.waitForSelector(
+      'iframe[name="frameBottom"]',
+      { visible: true, timeout: 20000 }
+    );
+    const frame = await iframeHandle.contentFrame();
+    if (!frame) throw new Error('Could not get contentFrame()');
+
+    console.log('[STEP] waiting for search input inside iframe (up to 50 s)…');
+    let searchFound = false;
+    try {
+      await frame.waitForSelector('#panel_SimpleSearch_c1', { visible: true, timeout: 50000 });
+      searchFound = true;
+    } catch (cssErr) {
+      console.warn('[WARN] CSS selector #panel_SimpleSearch_c1 not found after 50 s:', cssErr.message);
+      try {
+        const xpath = '//*[@id="panel_SimpleSearch_c1"]';
+        const handle = await frame.waitForXPath(xpath, { visible: true, timeout: 10000 });
+        if (handle) {
+          searchFound = true;
+        }
+      } catch (xpathErr) {
+        console.warn('[WARN] XPath //*[@id="panel_SimpleSearch_c1"] also not found:', xpathErr.message);
+      }
+    }
+
+    if (!searchFound) {
+      console.error('[ERROR] Could not locate #panel_SimpleSearch_c1 in iframe—skipping status check.');
+      return res.json({
+        success: true,
+        status: null,
+        message: 'Search box not found; cannot extract workflow status at this time.'
+      });
+    }
+
+    console.log('[STEP] entering contract number');
+    await frame.evaluate((cn) => {
+      const inp = document.querySelector('#panel_SimpleSearch_c1');
+      if (inp) {
+        inp.value = cn;
+        inp.focus();
+      }
+    }, contractNumber);
+
+    console.log('[STEP] clicking search button');
+    await frame.evaluate(() => document.querySelector('a#panel_buttonSearch_bt')?.click());
+    await new Promise(r => setTimeout(r, 5000));
+
+    console.log('[STEP] extracting status cell');
     const statusXPath = isLeaseOffer
       ? '//*[@id="gridResults_gv"]/tbody/tr[2]/td[13]'
       : '//*[@id="gridResults_gv"]/tbody/tr[2]/td[12]';
-
-    const statusText = await frame.evaluate((xpath) => {
+    const statusText = await frame.evaluate(xpath => {
       const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
-      return result.singleNodeValue ? result.singleNodeValue.textContent.trim() : null;
+      return result.singleNodeValue?.textContent.trim() || null;
     }, statusXPath);
 
-    console.log(`[🔍 Contract Status] ${contractNumber}: "${statusText}"`);
-    res.json({ success: true, status: statusText });
+    console.log(`[RESULT] ${contractNumber} → "${statusText}"`);
+    return res.json({ success: true, status: statusText });
+
   } catch (err) {
-    console.error('[❌ Contract Status Check Error]', err);
-    res.status(500).json({ message: 'Failed to check contract status', error: err.message });
+    console.error('[ERROR] Contract status check failed:', err);
+    return res.status(500).json({ message: 'Failed to check contract status', error: err.message });
   }
 });
 
@@ -1683,6 +2415,28 @@ app.get('/api/check-file-timestamp', async (req, res) => {
 });
 
 
+app.post('/api/update-workflow-status', async (req, res) => {
+  const { contractNumber, workflowStatus } = req.body;
+  if (!contractNumber || !workflowStatus) {
+    return res.status(400).json({ success: false, message: 'Missing contractNumber or workflowStatus' });
+  }
+
+  try {
+    const docId = contractNumber.replace(/\//g, '_');
+    await db.collection('compare_result').doc(docId).set(
+      { workflow_status: workflowStatus },
+      { merge: true }
+    );
+    console.log(`[✅ Firestore] workflow_status for ${docId} set to "${workflowStatus}"`);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error(`[❌ Failed to update workflow_status for ${contractNumber}]:`, err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+
 app.post('/api/contract-classify', async (req, res) => {
   try {
     const { ocrText } = req.body;
@@ -1715,6 +2469,204 @@ app.post('/api/contract-classify', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+
+app.post('/api/scrape-url-test', async (req, res) => {
+  const { systemType, username, password, contractNumber } = req.body;
+  // fallback if promptKey is missing or empty
+  const promptKey = (req.body.promptKey && req.body.promptKey.trim())
+    ? req.body.promptKey.trim()
+    : 'LOI_permanent_fixed_fields';
+
+  if (!systemType || systemType === 'others') {
+    return res.status(400).json({ success: false, message: 'Invalid systemType' });
+  }
+  if (!username || !password || !contractNumber) {
+    return res.status(400).json({ success: false, message: 'username, password & contractNumber required' });
+  }
+
+  try {
+    // --- LOGIN STEP ---
+    let browser, page;
+    if (browserSessions.has(systemType)) {
+      ({ browser, page } = browserSessions.get(systemType));
+    } else {
+      browser = await puppeteer.launch({ headless: false });
+      page = await browser.newPage();
+      await page.goto('https://mall-management.lotuss.com/Simplicity/apptop.aspx', { waitUntil: 'networkidle2' });
+
+      await page.waitForSelector('#lblToLoginPage', { timeout: 20000 });
+      await page.click('#lblToLoginPage');
+
+      await page.waitForSelector('input#username', { timeout: 20000 });
+      await page.type('input#username', username, { delay: 50 });
+      const continueSel1 = '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV > div.sc-jzgbtB.bIuYUf > form > div > div:nth-child(3) > div > button';
+      await page.waitForSelector(continueSel1, { timeout: 20000 });
+      await page.click(continueSel1);
+
+      await page.waitForSelector('input#password', { timeout: 20000 });
+      await page.type('input#password', password, { delay: 50 });
+      const continueSel2 = '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV > div.sc-jzgbtB.bIuYUf > form > div > div:nth-child(4) > div > button';
+      await page.waitForSelector(continueSel2, { timeout: 20000 });
+      await page.click(continueSel2);
+
+      await page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {});
+      await new Promise(r => setTimeout(r, 10000));
+
+      const html = await page.content();
+      if (html.includes('Invalid login')) {
+        await browser.close();
+        return res.status(401).json({ success: false, message: 'Invalid credentials' });
+      }
+      browserSessions.set(systemType, { browser, page });
+    }
+
+    // --- SCRAPE STEP ---
+    await page.waitForSelector('#menu_MenuLiteralDiv > ul > li:nth-child(10) > a', { timeout: 10000 });
+    await page.click('#menu_MenuLiteralDiv > ul > li:nth-child(10) > a');
+    await new Promise(r => setTimeout(r, 500));
+    await page.evaluate(() => {
+      const leaseMenu = [...document.querySelectorAll('a')].find(el => el.textContent.trim() === 'Lease');
+      leaseMenu?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+    await new Promise(r => setTimeout(r, 2000));
+
+    const isOffer = contractNumber.includes('LO');
+    const submenuText = isOffer ? 'Lease Offer' : 'Lease Renewal';
+    const submenuClicked = await page.evaluate(text => {
+      const links = [...document.querySelectorAll('a')];
+      const target = links.find(el => el.textContent.trim() === text);
+      if (target) { target.click(); return true; }
+      return false;
+    }, submenuText);
+    if (!submenuClicked) throw new Error(`❌ Could not click ${submenuText}`);
+    await new Promise(r => setTimeout(r, 10000));
+
+    await page.waitForSelector('iframe[name="frameBottom"]', { timeout: 70000 });
+    const iframeHandle = await page.$('iframe[name="frameBottom"]');
+    const frame = await iframeHandle.contentFrame();
+    if (!frame) throw new Error('❌ Could not access iframe content');
+
+    await frame.waitForSelector('#panel_SimpleSearch_c1', { visible: true, timeout: 70000 });
+    await frame.evaluate(cn => {
+      const input = document.querySelector('#panel_SimpleSearch_c1');
+      input.value = cn;
+      input.focus();
+    }, contractNumber);
+
+    await frame.waitForSelector('a#panel_buttonSearch_bt', { visible: true, timeout: 10000 });
+    await frame.evaluate(() => document.querySelector('a#panel_buttonSearch_bt')?.click());
+    await new Promise(r => setTimeout(r, 15000));
+
+    const viewButton = await frame.$('input[src*="view-black-16.png"]');
+    if (!viewButton) throw new Error('❌ View icon not found');
+    await viewButton.click();
+
+    const popupUrlMatch = isOffer ? 'leaseoffer/edit.aspx' : 'leaserenewal/edit.aspx';
+    let popup;
+    for (let i = 0; i < 15; i++) {
+      const pages = await browser.pages();
+      popup = pages.find(p => p.url().includes(popupUrlMatch) && p !== page);
+      if (popup) break;
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    if (!popup) throw new Error('❌ Popup window not found');
+    await popup.bringToFront();
+
+    const panels = [
+      '#panelMonthlyCharge_label',
+      '#panelOtherMonthlyCharge_label',
+      '#panelGTO_label',
+      '#LeaseMeterTypessArea_label',
+      '#panelSecurityDeposit_label',
+      '#panelOneTimeCharge_label'
+    ];
+    await new Promise(r => setTimeout(r, 10000));
+    for (const sel of panels) {
+      try {
+        const collapsed = await popup.$eval(sel, el => el.classList.contains('collapsible-panel-collapsed'));
+        if (collapsed) await popup.click(sel);
+      } catch {}
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    const raw = await popup.evaluate(() => document.body.innerText);
+    const promptFile = path.join(__dirname, 'prompts', `${promptKey}.txt`);
+    if (!fs.existsSync(promptFile)) throw new Error(`Prompt ${promptKey} not found`);
+    const template = fs.readFileSync(promptFile, 'utf8');
+    const gemRes = await model.generateContent(`${template}\n\nContent:\n${raw}`);
+    const gemText = await gemRes.response.text();
+
+    const docId = contractNumber.replace(/\//g, '_');
+    await db.collection('compare_result').doc(docId).set({
+      timestamp: new Date(),
+      contract_number: docId,
+      web_extracted: raw,
+      gemini_output: gemText,
+      popup_url: popup.url()
+    }, { merge: true });
+
+    return res.json({ success: true, raw, geminiOutput: gemText, popupUrl: popup.url() });
+  } catch (err) {
+    console.error('[SCRAPE-URL-TEST Error]', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+async function refreshAllVerifiedStatus() {
+  console.log('[⟳] Starting to recompute verified_status for all compare_result documents…');
+
+  try {
+    // 1) Grab every document in the "compare_result" collection
+    const snapshot = await db.collection('compare_result').get();
+
+    if (snapshot.empty) {
+      console.log('[⟳] No documents found in compare_result; nothing to update.');
+      return;
+    }
+
+    // 2) Loop through each doc, compute “Passed” vs “Needs Review”, then write
+    const batch = db.batch(); // use a batch write in case you have many docs
+
+    snapshot.docs.forEach((docSnap) => {
+      const data = docSnap.data();
+      const docRef = docSnap.ref;
+      const docId = docSnap.id; // e.g. "ABC123"
+
+      // a) Pull out compare_result array and validation_result array
+      //    * You can also include web_validation_result if desired, but up to you.
+      const compareArr = Array.isArray(data.compare_result) ? data.compare_result : [];
+      const pdfValArr = Array.isArray(data.validation_result) ? data.validation_result : [];
+      const webValArr = Array.isArray(data.web_validation_result)
+        ? data.web_validation_result
+        : [];
+
+      // b) Compute “all match = true?” and “all valid = true?”
+      const allCompareMatch = compareArr.length > 0 && compareArr.every((row) => row.match === true);
+      const allPdfValid = pdfValArr.length > 0 && pdfValArr.every((row) => row.valid === true);
+      const allWebValid = webValArr.length > 0 && webValArr.every((row) => row.valid === true);
+
+      // c) Decide final “verified” status rule:
+      //    Here we’ll say “Passed” only if all three arrays exist AND every row is true.
+      //    If any array is missing or any row fails, we call it “Needs Review.”
+      let finalStatus = 'Needs Review';
+      if (allCompareMatch && allPdfValid && allWebValid) {
+        finalStatus = 'Passed';
+      }
+
+      // d) Schedule a merge‐write updating “verified_status”
+      batch.set(docRef, { verified_status: finalStatus }, { merge: true });
+      console.log(`   • Doc ${docId}: compare(${allCompareMatch}), pdf(${allPdfValid}), web(${allWebValid}) → "${finalStatus}"`);
+    });
+
+    // 3) Commit in one batch (or split into multiple if > 500 writes)
+    await batch.commit();
+    console.log('[✅] All verified_status fields updated successfully.');
+  } catch (err) {
+    console.error('[❌] Error in refreshAllVerifiedStatus():', err);
+  }
+}
+
 // ===== Server Start =====
 const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));

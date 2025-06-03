@@ -135,127 +135,195 @@ function AIVision() {
     setLoading(true);
   
     try {
-      // === Step 1: Extract OCR text only ===
-      const textOnlyForm = new FormData();
-      files.forEach(file => textOnlyForm.append('file', file));
-      textOnlyForm.append('pages', selectedPages);
+      // === Process each file in turn ===
+      for (const file of files) {
+
+        const baseName = file.name.replace(/\.pdf$/i, '');
+        const validPattern = /^\d+_(?:LO|LR)\d+_\d+$/;
+        if (!validPattern.test(baseName)) {
+          console.log(`[⏭️ Skip invalid filename] ${file.name}`);
+          continue;
+        }
+        
+        // === Step 1: Extract OCR text for this file ===
+        const textOnlyForm = new FormData();
+        textOnlyForm.append('file', file);
+        textOnlyForm.append('pages', selectedPages);
   
-      const ocrRes = await axios.post('http://localhost:5001/api/extract-text-only', textOnlyForm, {
-        headers: textOnlyForm.getHeaders?.() || {},
-      });
+        let ocrText;
+        try {
+          const ocrRes = await axios.post(
+            'http://localhost:5001/api/extract-text-only',
+            textOnlyForm,
+            { headers: textOnlyForm.getHeaders?.() || {} }
+          );
+          ocrText = ocrRes.data.text;
+        } catch (e) {
+          console.warn(`⚠️ OCR failed for "${file.name}", skipping this file.`);
+          continue;
+        }
   
-      const ocrText = ocrRes.data.text;
-      if (!ocrText) throw new Error('No OCR text received');
+        if (!ocrText) {
+          console.warn(`⚠️ No OCR text for "${file.name}", skipping this file.`);
+          continue;
+        }
   
-      // === Step 2: Classify contract type and set prompt key globally
-      const selectedPrompt = await classifyContractType(ocrText); // <- this sets promptKey via setPromptKey()
-      if (!selectedPrompt) throw new Error('Prompt key not set');
+        // === Step 2: Classify contract type ===
+        let selectedPrompt;
+        try {
+          selectedPrompt = await classifyContractType(ocrText);
+        } catch {
+          console.warn(`⚠️ Classification failed for "${file.name}", skipping this file.`);
+          continue;
+        }
+        if (!selectedPrompt) {
+          console.warn(`⚠️ No prompt key for "${file.name}", skipping this file.`);
+          continue;
+        }
   
-      // === Step 3: Extract full content with selectedPrompt ===
-      const formData = new FormData();
-      files.forEach(file => formData.append('files', file));  // ✅ must be 'files'
-      formData.append('promptKey', selectedPrompt);           // ✅ must include .txt
-      formData.append('pages', selectedPages || 'all');       // ✅ fallback to 'all' if empty
+        // === Step 3: Extract full content with selectedPrompt ===
+        const formData = new FormData();
+        formData.append('files', file);
+        formData.append('promptKey', selectedPrompt);
+        formData.append('pages', selectedPages || 'all');
   
-      const res = await axios.post('http://localhost:5001/api/extract-text', formData);
-      setExtractedText(res.data.text);
-      setGeminiText(res.data.geminiOutput);
-      setPdfGemini(res.data.geminiOutput);
+        let textResponse;
+        try {
+          const res = await axios.post('http://localhost:5001/api/extract-text', formData);
+          textResponse = res.data;
+          setExtractedText(res.data.text);
+          setGeminiText(res.data.geminiOutput);
+          setPdfGemini(res.data.geminiOutput);
+        } catch {
+          console.warn(`⚠️ extract-text API failed for "${file.name}", skipping this file.`);
+          continue;
+        }
   
-      console.log(`[✅ Using final promptKey] ${selectedPrompt}`);
+        console.log(`[✅ Using final promptKey "${selectedPrompt}" for "${file.name}"]`);
   
-      // === Step 4: Extract contract number from Gemini output
-      let raw = res.data.geminiOutput.trim();
-      if (raw.startsWith('```json')) raw = raw.slice(7);
-      if (raw.endsWith('```')) raw = raw.slice(0, -3);
+        // === Step 4: Parse contract number from Gemini output ===
+        let raw = textResponse.geminiOutput.trim();
+        if (raw.startsWith('```json')) raw = raw.slice(7);
+        if (raw.endsWith('```')) raw = raw.slice(0, -3);
   
-      const firstBrace = raw.indexOf('{');
-      const lastBrace = raw.lastIndexOf('}');
-      const jsonBlock = raw.substring(firstBrace, lastBrace + 1);
-      const parsed = JSON.parse(jsonBlock);
-      const extractedContract = parsed?.['Contract Number']?.trim();
+        const firstBrace = raw.indexOf('{');
+        const lastBrace = raw.lastIndexOf('}');
+        if (firstBrace < 0 || lastBrace < 0) {
+          console.warn(`⚠️ Invalid JSON in Gemini output for "${file.name}", skipping.`);
+          continue;
+        }
   
-      if (extractedContract) {
+        const jsonBlock = raw.substring(firstBrace, lastBrace + 1);
+        let parsed;
+        try {
+          parsed = JSON.parse(jsonBlock);
+        } catch {
+          console.warn(`⚠️ JSON.parse failed for "${file.name}", skipping.`);
+          continue;
+        }
+  
+        const extractedContract = parsed?.['Contract Number']?.trim();
+        if (!extractedContract) {
+          console.warn(`⚠️ No "Contract Number" field in Gemini output for "${file.name}", skipping.`);
+          continue;
+        }
+  
+        // === Step 5: Auto-login & scrape for this contract ===
         setAutoScrapeLoading(true);
         setSystemType('simplicity');
         setUsername('TH40184213');
-        setPassword('P@ssword12345');
+        setPassword('u@@U5410154');
         setContractNumber(extractedContract);
   
-        console.log('[🔐 AutoLogin] Logging into Simplicity...');
-        const loginRes = await axios.post('http://localhost:5001/api/scrape-login', {
-          systemType: 'simplicity',
-          username: 'TH40184213',
-          password: 'P@ssword12345',
-        });
-  
-        if (loginRes.data.success) {
-          setIsLoggedIn(true);
-          console.log('[✅ AutoLogin Success] Now scraping...');
-  
-          const scrapeRes = await axios.post('http://localhost:5001/api/scrape-url', {
+        console.log(`[🔐 AutoLogin for "${file.name}" → ${extractedContract}]`);
+        let loginRes;
+        try {
+          loginRes = await axios.post('http://localhost:5001/api/scrape-login', {
             systemType: 'simplicity',
-            promptKey: selectedPrompt, // 👈 used only here
-            contractNumber: extractedContract,
+            username: 'TH40184213',
+            password: 'u@@U5410154',
           });
-  
-          setScrapedPopupUrl(scrapeRes.data.popupUrl);
-  
-          if (scrapeRes.data.success) {
-            setScrapedText(scrapeRes.data.raw);
-            setScrapedGeminiText(scrapeRes.data.geminiOutput);
-            console.log('[✅ Auto Scrape Done]');
-  
-            setCompareSourceA('pdf');
-            setCompareSourceB('web');
-            await compareFields();
-  
-            // === 🧠 Web Validation uses global promptKey (not selectedPrompt)
-            try {
-              let rawWeb = scrapeRes.data.geminiOutput.trim();
-              if (rawWeb.startsWith('```json')) rawWeb = rawWeb.slice(7);
-              if (rawWeb.endsWith('```')) rawWeb = rawWeb.slice(0, -3);
-  
-              const firstBrace = rawWeb.indexOf('{');
-              const lastBrace = rawWeb.lastIndexOf('}');
-              const jsonBlockWeb = rawWeb.substring(firstBrace, lastBrace + 1);
-              const parsedWeb = JSON.parse(jsonBlockWeb);
-  
-              await axios.post('http://localhost:5001/api/web-validate', {
-                contractNumber: extractedContract,
-                extractedData: parsedWeb,
-                promptKey, // ✅ uses React state promptKey
-              });
-  
-              console.log('[🧠 Web Validation Triggered]');
-            } catch (err) {
-              console.error('[❌ Failed to trigger web validation]', err);
-            }
-  
-            setTimeout(runDocumentValidation, 10000);
-          } else {
-            console.warn('[❌ Auto Scrape Failed]');
-          }
-        } else {
-          console.warn('[❌ AutoLogin Failed]');
+        } catch {
+          console.warn(`❌ AutoLogin request failed for "${file.name}".`);
+          setAutoScrapeLoading(false);
+          continue;
+        }
+        if (!loginRes.data.success) {
+          console.warn(`❌ AutoLogin rejected for "${file.name}".`);
+          setAutoScrapeLoading(false);
+          continue;
         }
   
+        console.log(`[🚀 AutoScrape for "${file.name}" → ${extractedContract}]`);
+        let scrapeRes;
+        try {
+          scrapeRes = await axios.post('http://localhost:5001/api/scrape-url', {
+            systemType: 'simplicity',
+            promptKey: selectedPrompt,
+            contractNumber: extractedContract,
+          });
+        } catch {
+          console.warn(`❌ Scrape-URL request failed for "${file.name}".`);
+          setAutoScrapeLoading(false);
+          continue;
+        }
+        setScrapedPopupUrl(scrapeRes.data.popupUrl);
+  
+        if (!scrapeRes.data.success) {
+          console.warn(`❌ scrape-url failed for "${file.name}".`);
+          setAutoScrapeLoading(false);
+          continue;
+        }
+  
+        setScrapedText(scrapeRes.data.raw);
+        setScrapedGeminiText(scrapeRes.data.geminiOutput);
+        console.log(`[✅ Auto Scrape Done for "${file.name}"]`);
+  
+        // === Step 6: Compare fields (PDF vs Web) & save to Firebase ===
+        setCompareSourceA('pdf');
+        setCompareSourceB('web');
+        try {
+          await compareFields();
+        } catch (e) {
+          console.warn(`⚠️ compareFields failed for "${file.name}".`);
+        }
+  
+        // === Step 7: Web validation step ===
+        try {
+          let rawWeb = scrapeRes.data.geminiOutput.trim();
+          if (rawWeb.startsWith('```json')) rawWeb = rawWeb.slice(7);
+          if (rawWeb.endsWith('```')) rawWeb = rawWeb.slice(0, -3);
+          const fb = rawWeb.indexOf('{'),
+            lb = rawWeb.lastIndexOf('}');
+          const jsonBlockWeb = rawWeb.substring(fb, lb + 1);
+          const parsedWeb = JSON.parse(jsonBlockWeb);
+  
+          await axios.post('http://localhost:5001/api/web-validate', {
+            contractNumber: extractedContract,
+            extractedData: parsedWeb,
+            promptKey,
+          });
+          console.log(`[🧠 Web Validation Triggered for "${file.name}"]`);
+        } catch {
+          console.warn(`⚠️ web-validate failed for "${file.name}".`);
+        }
+  
+        // === Step 8: Document validation (after a short delay) ===
+        await new Promise((r) => setTimeout(r, 10000));
+        await runDocumentValidation();
+  
         setAutoScrapeLoading(false);
+        console.log(`[✅ Finished processing "${file.name}"]`);
       }
     } catch (err) {
-      alert('Error extracting files');
-      console.error(err);
-      setAutoScrapeLoading(false);
+      console.error('❌ Error in extractFiles loop', err);
+    } finally {
+      setLoading(false);
     }
-  
-    setLoading(false);
   };
 
 
 
-
-
-  
   const scrapeUrl = async () => {
     if (!urlInput) return;
     setScrapeLoading(true);
@@ -444,62 +512,169 @@ function AIVision() {
   };
   
   const runDocumentValidation = async () => {
-    // Clean Gemini raw JSON block from OCR extraction
-    let raw = pdfGemini.trim();
+    // 1) First wait (up to 30s) until pdfGemini contains at least one “{” and one “}”
+    let raw = (pdfGemini || '').trim();
+    const maxRetries = 30;
+    let attempt = 0;
   
-    // Remove ```json markdown fences if present
-    if (raw.startsWith('```json')) raw = raw.slice(7);
-    if (raw.endsWith('```')) raw = raw.slice(0, -3);
+    while (
+      // stop once we see at least one “{” and one “}” somewhere in pdfGemini
+      (!(raw.includes('{') && raw.includes('}'))) &&
+      attempt < maxRetries
+    ) {
+      attempt++;
+      await new Promise(r => setTimeout(r, 1000));
+      raw = (pdfGemini || '').trim();
+    }
   
-    // Try to isolate the JSON block safely
+    // If after 30s there was no “{” and “}” at all, bail out
+    if (!(raw.includes('{') && raw.includes('}'))) {
+      console.warn(
+        `[⚠️ Validation] No JSON‐like braces found in pdfGemini after ${maxRetries} seconds; skipping validation.`
+      );
+      return;
+    }
+  
+    // 2) Strip off Markdown fences if present
+    if (raw.startsWith('```json')) {
+      raw = raw.slice(7);
+    }
+    if (raw.endsWith('```')) {
+      raw = raw.slice(0, -3);
+    }
+  
+    // 3) Now isolate from first “{” to last “}”
     const firstBrace = raw.indexOf('{');
-    const lastBrace = raw.lastIndexOf('}');
+    const lastBrace  = raw.lastIndexOf('}');
+    if (firstBrace < 0 || lastBrace < 0 || lastBrace <= firstBrace) {
+      console.warn(
+        '[⚠️ Validation] Could not find matching “{…}” block even after braces appeared; skipping validation.'
+      );
+      return;
+    }
     const jsonBlock = raw.substring(firstBrace, lastBrace + 1);
-  
     console.log('[🧠 Extracted JSON block]', jsonBlock);
   
+    // 4) Try to parse that substring
     let parsed;
     try {
-      parsed = typeof jsonBlock === 'object' ? jsonBlock : JSON.parse(jsonBlock);
+      parsed = JSON.parse(jsonBlock);
       console.log('[✅ Parsed OCR JSON Object]', parsed);
     } catch (err) {
-      console.error('[❌ Error parsing JSON]', err);
-      throw new Error('Error parsing extracted data');
+      console.warn(
+        '[⚠️ Error parsing OCR JSON—skipping validation payload]',
+        err.message
+      );
+      return;
     }
   
-    if (!parsed) {
-      console.error('[❌ Invalid Document Data]', parsed);
-      throw new Error('Invalid document data for validation.');
+    // 5) Send the parsed object to /api/validate-document
+    let validateRes;
+    try {
+      validateRes = await axios.post(
+        'http://localhost:5001/api/validate-document',
+        {
+          extractedData: parsed,
+          promptKey,
+        }
+      );
+    } catch (err) {
+      console.error('[❌ Validation API request failed]', err.message || err);
+      return;
     }
   
-    const validateRes = await axios.post('http://localhost:5001/api/validate-document', {
-      extractedData: parsed,
-      promptKey,
-    });
-  
-    console.log('[🧾 Raw Gemini Validation Result]', validateRes.data.validation);
-  
-    const rawValidation = validateRes.data.validation.trim()
+    // 6) Clean up the returned “```json … ```” text
+    let rawValidation = (validateRes.data.validation || '')
+      .trim()
       .replace(/^```json\s*/i, '')
       .replace(/```$/, '')
       .trim();
-  
     console.log('[🧹 Cleaned Validation JSON String]', rawValidation);
   
-    const parsedResult = JSON.parse(rawValidation);
-    console.log('[📋 Final Parsed Validation Object]', parsedResult);
+    // 7) Escape any stray backslashes that would break JSON.parse
+    rawValidation = rawValidation.replace(/\\([^"\\/bfnrtu])/g, '\\\\$1');
   
+    // 8) Parse the validation result
+    let parsedResult;
+    try {
+      parsedResult = JSON.parse(rawValidation);
+      console.log('[📋 Final Parsed Validation Object]', parsedResult);
+    } catch (err) {
+      console.error('[❌ Error parsing validation JSON]', err.message || err);
+      return;
+    }
+  
+    // 9) Update React state
     setValidationResult(parsedResult);
   
+    // 10) Save to Firestore via backend
     const contractField = parsed?.['Contract Number'] || 'unknown_contract';
-    const contractId = contractField.replace(/\//g, '_');
-  
-    await axios.post('http://localhost:5001/api/save-validation-result', {
-      contractNumber: contractId,
-      validationResult: parsedResult,
-    });
+    const contractId    = contractField.replace(/\//g, '_');
+    try {
+      await axios.post('http://localhost:5001/api/save-validation-result', {
+        contractNumber: contractId,
+        validationResult: parsedResult,
+      });
+      console.log(`[🔥 Saved validation_result for ${contractId} to Firestore]`);
+    } catch (err) {
+      console.error(
+        '[❌ Error saving validation_result to Firestore]',
+        err.message || err
+      );
+    }
   };
   
+  const runDocumentValidationDirect = async (parsedData) => {
+    // parsedData is already a JS object from geminiOutput
+    console.log('[🧠 Parsed OCR JSON Object (direct)]', parsedData);
+  
+    let validateRes;
+    try {
+      validateRes = await axios.post(
+        'http://localhost:5001/api/validate-document',
+        {
+          extractedData: parsedData,
+          promptKey, // still coming from your React state
+        }
+      );
+    } catch (err) {
+      console.error('[❌ Validation API request failed]', err.message || err);
+      return;
+    }
+  
+    // Strip the Markdown fences out of validateRes.data.validation
+    const rawValidation = validateRes.data.validation
+      .trim()
+      .replace(/^```json\s*/i, '')
+      .replace(/```$/, '')
+      .trim();
+    console.log('[🧹 Cleaned Validation JSON String (direct)]', rawValidation);
+  
+    let parsedResult;
+    try {
+      parsedResult = JSON.parse(rawValidation);
+      console.log('[📋 Final Parsed Validation Object (direct)]', parsedResult);
+    } catch (err) {
+      console.error('[❌ Error parsing validation JSON (direct)]', err.message || err);
+      return;
+    }
+  
+    // Update React state so your UI shows it
+    setValidationResult(parsedResult);
+  
+    // Save to your backend / Firestore
+    const contractField = parsedData?.['Contract Number'] || 'unknown_contract';
+    const contractId = contractField.replace(/\//g, '_');
+    try {
+      await axios.post('http://localhost:5001/api/save-validation-result', {
+        contractNumber: contractId,
+        validationResult: parsedResult,
+      });
+      console.log(`[🔥 Saved validation_result for ${contractId} to Firestore]`);
+    } catch (err) {
+      console.error('[❌ Error saving validation_result to Firestore]', err.message || err);
+    }
+  };
 
   const autoProcessContracts = async () => {
     setLoading(true); // Start loading indicator
