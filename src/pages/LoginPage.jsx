@@ -12,6 +12,8 @@ export default function LoginPage({ setUser }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
+
 
   async function handleLogin(e) {
     e.preventDefault();
@@ -27,7 +29,7 @@ export default function LoginPage({ setUser }) {
       const result = await res.json();
       if (res.ok) {
         // store in parent
-        setUser({ email: result.email, role: result.role });
+        setUser({ email: result.email, role: result.role, password });
         // redirect based on role:
         if (result.role === 'admin') {
           navigate('/dashboard');
@@ -48,12 +50,12 @@ export default function LoginPage({ setUser }) {
   return (
     <div className="login-container">
       <form onSubmit={handleLogin} className="login-form">
-        <h2>Project Login</h2>
+        <h2>LOI Auto-check</h2>
         {error && <div className="error-message">{error}</div>}
         <input
           className="login-input"
-          type="email"
-          placeholder="Email"
+          type="text"
+          placeholder="Employee ID (THxxxxxxxx)"
           value={email}
           onChange={e => setEmail(e.target.value)}
           required

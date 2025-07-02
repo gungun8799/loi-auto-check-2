@@ -7,7 +7,7 @@ Extract key fields from the following rent contract content and return these fie
   "Property Type",
   "Customer Name",
   "Customer Address",
-  "Tenant Type",(this field is close to the Unit number start with "PN", for web scrape extract the value after "-", for example if the field is "PN3 - PN Car Service & Maintenance", put "PN Car Service & Maintenance" in this field  ),
+  "Tenant Type",(this field is close to the Unit number start with "PX" where X is the english character, for web scrape extract the value after "-", for example if the field is "PN3 - PN Car Service & Maintenance", put "PN Car Service & Maintenance" in this field  ),
   "Tenant selection",(Put as "No" for now)
    "Big Tenant",(Put as "No" for now)
   "Proposed lease commencement date",

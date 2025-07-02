@@ -5,6 +5,7 @@ import fsPromises from 'fs/promises';
 import path from 'path';
 import admin from 'firebase-admin';
 import { fileURLToPath } from 'url';
+import XLSX from 'xlsx';
 
 // ─── Fix for “__dirname” in ES modules ───────────────────────────
 const __filename = fileURLToPath(import.meta.url);
@@ -41,6 +42,69 @@ for (const folder of [PASSED_FOLDER, FAILED_FOLDER, SKIPPED_FOLDER]) {
   }
 }
 
+
+const handleTodaysReport = async (outputFolder) => {
+  console.log('[📁] Running handleTodaysReport...');
+
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const dd = String(today.getDate()).padStart(2, '0');
+  const todayString = `${yyyy}-${mm}-${dd}`;
+  const fromDate = new Date(`${todayString}T00:00:00`);
+  const toDate = new Date(`${todayString}T23:59:59.999`);
+
+  console.log(`🔎 Looking for contracts from: ${fromDate.toISOString()} → ${toDate.toISOString()}`);
+
+  const snapshot = await db.collection('compare_result').get();
+  console.log(`[📦] Fetched ${snapshot.size} total documents from Firestore.`);
+
+  const rows = [];
+
+  snapshot.forEach(doc => {
+    const data = doc.data();
+    const ts = data.timestamp?.toDate?.() || new Date(data.timestamp);
+
+    if (ts >= fromDate && ts <= toDate) {
+      console.log(`✅ MATCH: ${doc.id} (${ts.toISOString()})`);
+
+      const {
+        pdf_extracted, web_extracted, compare_result,
+        validation_result, web_validation_result,
+        meter_validation_result, gemini_output,
+        popup_url, ...rest
+      } = data;
+
+      rows.push({
+        ...rest,
+        contract_number: doc.id.replace(/_/g, '/'),
+        timestamp: ts.toISOString(),
+        status: determineStatus(compare_result, validation_result)
+      });
+    }
+  });
+
+  if (rows.length === 0) {
+    console.log('[📄] No contracts found for today, skipping report export.');
+    return;
+  }
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Contracts');
+
+  const filePath = path.join(outputFolder, 'contract-summary.xlsx');
+  XLSX.writeFile(wb, filePath);
+
+  console.log(`[✅] Excel report exported to: ${filePath}`);
+};
+
+// Helper to determine status like "Passed" / "Needs Review"
+const determineStatus = (compare_result, validation_result) => {
+  const allValid = Array.isArray(validation_result) && validation_result.every(r => r.valid === true);
+  const allMatch = Array.isArray(compare_result) && compare_result.every(r => r.match === true);
+  return (allValid && allMatch) ? 'Passed' : 'Needs Review';
+};
 /**
  * Moves `filename` from FOLDER_PATH → destinationFolder.
  * Waits 3 seconds, attempts a fs.rename; if that fails, falls back to copy+delete.
@@ -121,6 +185,8 @@ async function fetchContractStatus(contractNumber) {
  *   1) Fetch its “status” via fetchContractStatus()
  *   2) Move to verification_passed / verification_failed / skipped accordingly
  */
+
+
 async function processContractsInFolder() {
   const files = fs
     .readdirSync(FOLDER_PATH)
@@ -164,6 +230,7 @@ async function processContractsInFolder() {
 // ─── Run immediately ───────────────────────────────────────────────────────────
 (async () => {
   try {
+    await handleTodaysReport(OUTPUT_BASE);
     await processContractsInFolder();
   } catch (err) {
     console.error('[❌] Unhandled error in processContractsInFolder():', err);

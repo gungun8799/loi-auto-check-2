@@ -48,9 +48,9 @@
 /* Filters Section */
 .filtersWrapper {
   display: flex;
-  justify-content: space-between;
-  gap: 0.4rem;
-  margin: 0.5rem 0;
+  justify-content: left;
+  gap: 2rem;
+  margin: 0.2rem 0;
   flex-wrap: wrap;
 }
 
@@ -70,7 +70,7 @@
 }
 
 .filtersWrapper select {
-  width: 20%;
+  width: 10%;
 }
 
 .filtersWrapper button {
@@ -420,6 +420,24 @@ button.exportButton:hover {
   background-color: #e0e0e0;
   border-color: #999;
 }
+
+.loadingOverlay {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+.spinner {
+  width: 64px; height: 64px;
+  border: 8px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg) } }
+
 
 @keyframes spin {
   to {

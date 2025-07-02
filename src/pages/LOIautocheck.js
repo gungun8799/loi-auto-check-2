@@ -11,7 +11,7 @@ function AIVision() {
   const [geminiText, setGeminiText] = useState('');
   const [pdfGemini, setPdfGemini] = useState('');
   const [loading, setLoading] = useState(false);
-  const [promptKey, setPromptKey] = useState('');
+  const [promptKey, setPromptKey] = useState('LOI_permanent_fixed_fields');
   const [promptOptions, setPromptOptions] = useState([]);
 
   const [urlInput, setUrlInput] = useState('');
@@ -48,6 +48,8 @@ function AIVision() {
     const [successMessage, setSuccessMessage] = useState(null); // State for success messages
     const [autoProcessLoading, setAutoProcessLoading] = useState(false); // Changed loading to autoProcessLoading
     const [scrapedPopupUrl, setScrapedPopupUrl] = useState('');
+    const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
+
   
 
   useEffect(() => {
@@ -144,7 +146,7 @@ function AIVision() {
           console.log(`[⏭️ Skip invalid filename] ${file.name}`);
           continue;
         }
-        
+
         // === Step 1: Extract OCR text for this file ===
         const textOnlyForm = new FormData();
         textOnlyForm.append('file', file);
@@ -231,8 +233,8 @@ function AIVision() {
         // === Step 5: Auto-login & scrape for this contract ===
         setAutoScrapeLoading(true);
         setSystemType('simplicity');
-        setUsername('TH40184213');
-        setPassword('u@@U5410154');
+        setUsername('john.pattanakarn@lotuss.com');
+        setPassword('Gofresh@0425-21');
         setContractNumber(extractedContract);
   
         console.log(`[🔐 AutoLogin for "${file.name}" → ${extractedContract}]`);
@@ -240,8 +242,8 @@ function AIVision() {
         try {
           loginRes = await axios.post('http://localhost:5001/api/scrape-login', {
             systemType: 'simplicity',
-            username: 'TH40184213',
-            password: 'u@@U5410154',
+            username: 'john.pattanakarn@lotuss.com',
+            password: 'Gofresh@0425-21',
           });
         } catch {
           console.warn(`❌ AutoLogin request failed for "${file.name}".`);
@@ -470,6 +472,7 @@ function AIVision() {
       }
   
       const compareRes = await axios.post('http://localhost:5001/api/gemini-compare', {
+        
         formattedSources,
         promptKey,
       });

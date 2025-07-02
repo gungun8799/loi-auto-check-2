@@ -22,7 +22,16 @@ for (const folder of [PASSED_FOLDER, FAILED_FOLDER, SKIPPED_FOLDER]) {
   }
 }
 
-async function processContractsInFolder() {
+/*************  ✨ Windsurf Command ⭐  *************/
+  /**
+   * Processes all PDF files in the `contracts` folder and moves them to `processed/verification_passed` or `processed/verification_failed` based on whether the contract was confirmed.
+   * Skips any files with invalid filenames (not matching the expected pattern of digits_(LO|LR)digits_digits.pdf).
+   * Logs and continues if the file has already been processed (i.e. already exists in the output folders).
+   * If the file is skipped due to an invalid filename or already having been processed, optionally moves it to the `skipped` folder.
+   * Waits 90 seconds between processing each file.
+   * @returns {Promise<void>}
+   */
+/*******  99d33ffb-ad84-4ce2-b05f-eda43bb739a2  *******/async function processContractsInFolder() {
   const files = fs.readdirSync(FOLDER_PATH).filter(f => f.toLowerCase().endsWith('.pdf'));
 
   for (const file of files) {
@@ -109,131 +118,186 @@ async function processOneContract(filename) {
 
     const classifyRes = await axios.post('http://localhost:5001/api/contract-classify', { ocrText });
     const contractType = classifyRes.data?.contractType || 'unknown';
-    let promptKey = 'LOI_permanent_fixed_fields.txt';
+    let promptKey = 'LOI_permanent_fixed_fields';
     if (contractType === 'service_express') {
-      promptKey = 'LOI_service_express_fields.txt';
+      promptKey = 'LOI_service_express_fields';
     }
     console.log(`[🔍 Contract Type Detected] ${contractType}`);
     console.log(`[📌 Prompt selected based on contract type] ${promptKey}`);
 
-    // ─── Step 2: Launch Puppeteer & navigate to our front-end ─────────────
-    const browser = await puppeteer.launch({ headless: false });
-    const page = await browser.newPage();
-    await page.goto('http://localhost:3000/ai-vision/loi-check', { waitUntil: 'networkidle2' });
+    // ─── Step 2: Direct API extract (bypass the UI entirely) ───────────────
+    console.log('[🔁 Calling /api/extract-text directly for OCR & Gemini]');
+    const extractForm = new FormData();
+    // Append the PDF under “files” (match upload.array('files'))
+    extractForm.append(
+      'files',
+      fs.createReadStream(filePath),
+      path.basename(filePath)
+    );
+    // Ensure pages is provided
+    extractForm.append('pages', 'all');
+    extractForm.append('promptKey', promptKey);
 
-    page.on('console', msg => console.log('[Browser log]', msg.text()));
+    // 2.1) Extract text + Gemini via backend
+    let extractRes
+    try {
+      extractRes = await axios.post(
+        'http://localhost:5001/api/extract-text',
+        extractForm,
+        { headers: extractForm.getHeaders() }
+      )
+    } catch (err) {
+      console.error('[❌ extract-text failed]', err.response?.data || err.message)
+      throw err
+    }
+    const extractedText = extractRes.data.text
+    const geminiOut     = extractRes.data.geminiOutput
+    console.log('[✅ Backend extract complete]')
 
-    // Inject the prompt key so when the UI initializes it picks the right prompt
-    await page.evaluate((pk) => {
-      window.__injectedPromptKey = pk;
-    }, promptKey);
-    console.log('[✅ Using final promptKey]', promptKey);
+    // 2.2) Parse out the Contract Number from Gemini output
+    let parsedPdf
+    try {
+      let raw = geminiOut.trim()
+        .replace(/^```json\s*/i, '')
+        .replace(/```$/, '')
+      parsedPdf = JSON.parse(raw)
+    } catch (e) {
+      console.error('[❌ Failed to parse Gemini JSON]', e.message)
+      throw e
+    }
+    const extractedContractNumber = parsedPdf['Contract Number']
+    const contractId = extractedContractNumber.replace(/\//g, '_')
+    console.log(`[🔖 Extracted Contract Number] ${extractedContractNumber}`)
 
-    // ─── Step 3: “Extract” PDF so that LOIautocheck.js shows the Gemini JSON ───
-    console.log('[📄 Uploading PDF]');
-    const inputHandle = await page.$('input[type="file"]');
-    await inputHandle.uploadFile(filePath);
+    // 2.3) Auto‐scrape Simplicity for the extracted contract
+    console.log(`[🔐 Auto-scrape for ${extractedContractNumber}]`)
+    const scrapeRes = await axios.post('http://localhost:5001/api/scrape-url', {
+      systemType:      'simplicity',
+      promptKey,
+      contractNumber:  extractedContractNumber,
+    })
+    if (!scrapeRes.data.success) {
+      throw new Error(`Scrape-URL failed: ${scrapeRes.data.message}`)
+    }
+    const webRaw       = scrapeRes.data.raw
+    const webGeminiRaw = scrapeRes.data.geminiOutput
+    console.log('[✅ Web scrape complete]')
 
-    console.log('[🧠 Waiting for “Extract” button]');
-    await page.waitForSelector('button', { visible: true, timeout: 10000 });
-
-    const buttons = await page.$$('button');
-    for (const btn of buttons) {
-      const label = await page.evaluate(el => el.innerText, btn);
-      if (label.includes('Extract')) {
-        await btn.click();
-        console.log('[🚀 Triggered Extract]');
-        break;
-      }
+    
+    function cleanGeminiJson(raw) {
+      if (!raw) return '{}';
+    
+      let t = raw.trim();
+    
+      // Remove markdown code fences
+      if (t.startsWith("```json")) t = t.slice(7);
+      if (t.startsWith("```")) t = t.slice(3);
+      if (t.endsWith("```")) t = t.slice(0, -3);
+    
+      // Remove control characters
+      t = t.replace(/[\u0000-\u001F]+/g, '');
+    
+      // Remove any invalid trailing commas
+      t = t.replace(/,\s*([}\]])/g, '$1');
+    
+      // Escape any standalone backslashes
+      t = t.replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
+    
+      // Optional: normalize smart quotes (in case Gemini adds them)
+      t = t.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+    
+      return t;
+    }
+    
+    let parsedWeb;
+    try {
+      const cleanedWebGemini = cleanGeminiJson(webGeminiRaw);
+      const b1 = cleanedWebGemini.indexOf('{');
+      const b2 = cleanedWebGemini.lastIndexOf('}');
+      const jsonString = cleanedWebGemini.slice(b1, b2 + 1);
+    
+      console.log('[🧪 Cleaned Web Gemini JSON Preview]', jsonString.slice(0, 300));
+      parsedWeb = JSON.parse(jsonString);
+    } catch (e) {
+      console.error('[❌ Failed to parse web Gemini JSON]', e.message);
+      console.log('[🧨 Original Gemini Output]', webGeminiRaw?.slice(0, 500));
+      throw new Error('Failed to parse web Gemini JSON: ' + e.message);
     }
 
-    // Wait the full 45 s so the front-end has time to finish all OCR→Gemini work
-    console.log('[⏳ Waiting 45s for frontend to auto-complete “Extract”]');
-        // ─── Replace the blind 45 s sleep with “wait until the Gemini JSON appears in a <pre>” ────────────────
-    //
-    console.log('[⏳ Waiting for Gemini output to appear in <pre>]');
-    await page.waitForFunction(() => {
-      // We assume LOIautocheck.js renders the “Gemini Output” inside a <pre> tag.
-      const pres = Array.from(document.querySelectorAll('pre'));
-      if (pres.length === 0) return false;
-      // “trim” and check that it starts with “{” and ends with “}”
-      return pres.some(el => {
-        const t = el.innerText.trim();
-        return t.startsWith('{') && t.endsWith('}');
-      });
-    }, { polling: 'mutation', timeout: 60000 });
-    console.log('[✅ Gemini JSON now present]');
+    // 2.5) Gemini Compare
+    const formattedSources = { pdf: parsedPdf, web: parsedWeb }
+    const cmpRes = await axios.post('http://localhost:5001/api/gemini-compare', {
+       
+      formattedSources,
+      promptKey,
+    })
+    let cmpRaw = cmpRes.data.response.trim()
+    .replace(/^```json\s*/i, '')
+    .replace(/```$/, '')
+  
+    // ─── Sanitize invalid escape sequences ──────────────────────────────────────
+    // 1) Remove any stray control characters (optional)
+    // 2) Escape any backslash that isn’t already part of a valid escape
+    const sanitized = cmpRaw
+      // strip out non-printable control chars (0x00–0x1F)
+      .replace(/[\u0000-\u001F]+/g, '')
+      // escape any standalone backslashes
+      .replace(/\\(?!["\\/bfnrtu])/g, '\\\\')
+    
+    let compareResult
+    try {
+      compareResult = JSON.parse(sanitized)
+    } catch (e) {
+      console.error('[❌ Failed to parse sanitized compare JSON]', e.message)
+      throw e
+    }
 
-    // ─── Step 4: CLICK “Compare” and wait for compare_result to be saved ─────────
-    console.log('[🖱️  Clicking “Compare” button]');
-    // (Adjust this selector if your “Compare” button’s text is different)
-    await page.evaluate(() => {
-      const btn = [...document.querySelectorAll('button')]
-        .find(el => el.innerText.trim() === 'Compare');
-      if (btn) { btn.click(); }
-    });
 
-    // Now wait for the back-end that saves “compare_result” to Firestore:
-    await page.waitForResponse(response =>
-      response.url().endsWith('/api/save-compare-result')
-      && response.status() === 200,
-      { timeout: 45000 }
-    );
-    console.log('[✅ compare_result saved to Firestore]');
+    // 2.7) Document Validation
+    const docValRes = await axios.post('http://localhost:5001/api/validate-document', {
+      extractedData: parsedPdf,
+      promptKey,
+    })
+    let val = docValRes.data.validation.trim()
+      .replace(/^```json\s*/i, '')
+      .replace(/```$/, '')
+    const validationResult = JSON.parse(val)
+    await axios.post('http://localhost:5001/api/save-validation-result', {
+      contractNumber:    contractId,
+      validationResult,
+    })
+    console.log('[✅ Saved validation_result]')
 
-    // ─── Step 5: CLICK “Validate Document” and wait for validation_result──────
-    console.log('[🖱️  Clicking “Validate Document” button]');
-    await page.evaluate(() => {
-      const btn = [...document.querySelectorAll('button')]
-        .find(el => el.innerText.trim().includes('Validate Document'));
-      if (btn) { btn.click(); }
-    });
+    // 2.8) Web Validation
+    const webValRes = await axios.post('http://localhost:5001/api/web-validate', {
+      contractNumber:  extractedContractNumber,
+      extractedData:   parsedWeb,
+      promptKey,
+    })
+    const webValidation = webValRes.data.validationResult
+    if (Array.isArray(webValidation)) {
+      await axios.post('http://localhost:5001/api/save-validation-result', {
+        contractNumber:    contractId,
+        validationResult:  webValidation,
+      })
+      console.log('[✅ Saved web_validation_result]')
+    } else {
+      console.warn('[⚠️ Web validation returned no array; skipping save]')
+    }
 
-    // Wait for the back-end endpoint that saves “validation_result”:
-    await page.waitForResponse(response =>
-      response.url().endsWith('/api/save-validation-result')
-      && response.status() === 200,
-      { timeout: 45000 }
-    );
-    console.log('[✅ validation_result saved to Firestore]');
+    // 2.9) Finally save compare + both validations in one shot
+const fullPayload = {
+  contractNumber:  contractId,
+  compareResult,
+  pdfGemini:       geminiOut,
+  webGemini:       webGeminiRaw,
+  validationResult,        // your document‐validation array
+  webValidationResult: webValidation  // your web‐validation array
+};
+await axios.post('http://localhost:5001/api/save-compare-result', fullPayload);
+console.log('[✅ Saved compare + validations together]');
 
-    // ─── Step 6: METER CHECK (if your UI has a “Check Meters” button, click it) ─
-    // Suppose your front-end has a “Check Meters” button that fires e.g. /api/meter-validate.
-    // Adjust the selector text accordingly:
-    console.log('[🖱️  Clicking “Check Meter” (UI) to trigger meter‐validation]');
-    await page.evaluate(() => {
-      const btn = [...document.querySelectorAll('button')]
-        .find(el => el.innerText.trim().includes('Check Meter'));
-      if (btn) { btn.click(); }
-    });
-
-    // Wait for the back-end meter‐validation endpoint:
-    await page.waitForResponse(response =>
-      response.url().endsWith('/api/meter-validate')  // whatever your meter‐validate endpoint is
-      && response.status() === 200,
-      { timeout: 45000 }
-    );
-    console.log('[✅ Meter result saved to Firestore]');
-
-    // ─── Step 7: Finally click “Web Validate” (if separate) or just trust that compare+validate suffice.
-    // If you have a “Web Validate” button that calls /api/web-validate, do the same:
-    console.log('[🖱️  Clicking “Web Validate” button]');
-    await page.evaluate(() => {
-      const btn = [...document.querySelectorAll('button')]
-        .find(el => el.innerText.trim().includes('Web Validate'));
-      if (btn) { btn.click(); }
-    });
-    await page.waitForResponse(response =>
-      response.url().endsWith('/api/web-validate')
-      && response.status() === 200,
-      { timeout: 45000 }
-    );
-    console.log('[✅ web_validate saved to Firestore]');
-
-    // ─── Step 8: Close browser and return success ─────────────────────────────────
-    console.log(`[✅ All Firestore writes for "${filename}" complete.]`);
-    await browser.close();
-    return true;
+    return true
 
   } catch (err) {
     console.error('[❌ Error during processing]', err.message || err);

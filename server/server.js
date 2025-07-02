@@ -711,7 +711,7 @@ app.post('/api/open-popup-tab', async (req, res) => {
       console.log('[Login] Waiting for username field');
       await page.waitForSelector('input#username', { timeout: 20000 });
       console.log('[Login] Typing username');
-      await page.type('input#username', 'TH40184213', { delay: 50 });
+      await page.type('input#username', 'john.pattanakarn@lotuss.com', { delay: 50 });
       const cont1 = '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV > div.sc-jzgbtB.bIuYUf > form > div > div:nth-child(3) > div > button';
       console.log('[Login] Waiting for Continue #1');
       await page.waitForSelector(cont1, { timeout: 20000 });
@@ -723,7 +723,7 @@ app.post('/api/open-popup-tab', async (req, res) => {
       console.log('[Login] Waiting for password field');
       await page.waitForSelector('input#password', { timeout: 20000 });
       console.log('[Login] Typing password');
-      await page.type('input#password', 'u@@U5410154', { delay: 50 });
+      await page.type('input#password', 'Gofresh@0425-21', { delay: 50 });
       const cont2 = '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV > div.sc-jzgbtB.bIuYUf > form > div > div:nth-child(4) > div > button';
       console.log('[Login] Waiting for Continue #2');
       await page.waitForSelector(cont2, { timeout: 20000 });
@@ -1001,29 +1001,64 @@ app.post('/api/gemini-compare', async (req, res) => {
 
 // ===== Force Process Endpoint =====
 
+const API_URL = process.env.API_URL || 'http://localhost:5001';
 app.post('/api/force-process-contract', async (req, res) => {
   const { contractNumber, promptKey = 'LOI_permanent_fixed_fields' } = req.body;
-
   if (!contractNumber) {
-    return res.status(400).json({ message: 'Missing contractNumber in request body' });
+    return res
+      .status(400)
+      .json({ success: false, message: 'Missing contractNumber in request body' });
   }
 
-  try {
-    const filePath = path.join(process.cwd(), 'contracts', `${contractNumber}.pdf`);
-
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ message: `File not found: ${contractNumber}.pdf` });
+  const doProcess = async () => {
+    // 1) Auto‐login to Simplicity so scrape‐URL calls will succeed
+    const loginRes = await axios.post(`${API_URL}/api/scrape-login`, {
+      systemType: 'simplicity',
+      username:   'john.pattanakarn@lotuss.com',
+      password:   'Gofresh@0425-21'
+    });
+    if (!loginRes.data.success) {
+      throw new Error('Auto-login to Simplicity failed');
     }
 
-    console.log(`[⚡ FORCE PROCESS] Triggered for: ${contractNumber}`);
-    await processOneContract(`${contractNumber}.pdf`, promptKey);
+    // 2) Run the exact same pipeline you use in your folder‐processor,
+    //    but just for this one file.
+    const filename = `${contractNumber}.pdf`;
+    const ok = await processOneContract(filename, promptKey);
+    if (!ok) {
+      throw new Error(`Processing logic returned false for ${filename}`);
+    }
+  };
 
-    res.json({ success: true, message: `Forced processing complete for ${contractNumber}` });
+  try {
+    try {
+      await doProcess();
+    } catch (err) {
+      // if we timed out clicking the Lease menu, clear the session and retry once
+      if (err.message.includes('Waiting for selector') && err.message.includes('li:nth-child(10) > a')) {
+        console.warn('[WARN] Lease-menu timeout, clearing session and retrying...');
+        browserSessions.delete('simplicity');
+        await doProcess();
+      } else {
+        throw err;
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `Forced processing and end–to–end pipeline complete for ${contractNumber}`
+    });
+
   } catch (err) {
     console.error('[❌ Force Process Error]', err);
-    res.status(500).json({ success: false, message: 'Force processing failed', error: err.message });
+    return res.status(500).json({
+      success: false,
+      message: 'Force processing failed',
+      error: err.message
+    });
   }
 });
+
 
 
 app.post('/api/store-compare-result', async (req, res) => {
@@ -1083,7 +1118,7 @@ app.post('/api/web-validate', async (req, res) => {
 
       console.log('[LOGIN] entering username');
       await page.waitForSelector('input#username', { visible: true, timeout: 20000 });
-      await page.type('input#username', 'TH40184213', { delay: 50 });
+      await page.type('input#username', 'john.pattanakarn@lotuss.com', { delay: 50 });
 
       const continueSel1 =
         '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV ' +
@@ -1094,7 +1129,7 @@ app.post('/api/web-validate', async (req, res) => {
 
       console.log('[LOGIN] entering password');
       await page.waitForSelector('input#password', { visible: true, timeout: 20000 });
-      await page.type('input#password', 'u@@U5410154', { delay: 50 });
+      await page.type('input#password', 'Gofresh@0425-21', { delay: 50 });
 
       const continueSel2 =
         '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV ' +
@@ -1591,7 +1626,7 @@ app.post('/api/refresh-contract-status', async (req, res) => {
 
       console.log('[REFRESH] enter username');
       await page.waitForSelector('input#username', { visible: true, timeout: 20000 });
-      await page.type('input#username', 'TH40184213', { delay: 50 });
+      await page.type('input#username', 'john.pattanakarn@lotuss.com', { delay: 50 });
       const cont1 = '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV > div.sc-jzgbtB.bIuYUf > form > div > div:nth-child(3) > div > button';
       console.log('[REFRESH] click username Continue');
       await page.waitForSelector(cont1, { visible: true, timeout: 20000 });
@@ -1599,7 +1634,7 @@ app.post('/api/refresh-contract-status', async (req, res) => {
 
       console.log('[REFRESH] enter password');
       await page.waitForSelector('input#password', { visible: true, timeout: 20000 });
-      await page.type('input#password', 'u@@U5410154', { delay: 50 });
+      await page.type('input#password', 'Gofresh@0425-21', { delay: 50 });
       const cont2 = '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV > div.sc-jzgbtB.bIuYUf > form > div > div:nth-child(4) > div > button';
       console.log('[REFRESH] click password Continue');
       await Promise.all([
@@ -2178,8 +2213,13 @@ app.post('/api/check-contract-status', async (req, res) => {
     const systemType = 'simplicity';
     let browser, page;
 
+    // Hoist these selectors so both login branches can use them
+    const continueSel1 = '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV > div.sc-jzgbtB.bIuYUf > form > div > div:nth-child(3) > div > button';
+    const continueSel2 = '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV > div.sc-jzgbtB.bIuYUf > form > div > div:nth-child(4) > div > button';
+
     // ─── 1) LOGIN OR RELOAD ─────────────────────────────────────────────────────────────
     if (!browserSessions.has(systemType)) {
+      // Fresh login
       console.log('[STEP] launching browser/session');
       browser = await puppeteer.launch({ headless: false });
       page = await browser.newPage();
@@ -2197,10 +2237,9 @@ app.post('/api/check-contract-status', async (req, res) => {
 
       console.log('[STEP] typing username');
       await page.waitForSelector('input#username', { visible: true, timeout: 20000 });
-      await page.type('input#username', 'TH40184213', { delay: 50 });
-      const continueSel1 = '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV > div.sc-jzgbtB.bIuYUf > form > div > div:nth-child(3) > div > button';
-      console.log('[STEP] clicking username Continue');
+      await page.type('input#username', 'john.pattanakarn@lotuss.com', { delay: 50 });
       await page.waitForSelector(continueSel1, { visible: true, timeout: 20000 });
+      console.log('[STEP] clicking username Continue');
       await page.click(continueSel1);
 
       console.log('[STEP] waiting 5s for password form');
@@ -2208,10 +2247,9 @@ app.post('/api/check-contract-status', async (req, res) => {
 
       console.log('[STEP] typing password');
       await page.waitForSelector('input#password', { visible: true, timeout: 20000 });
-      await page.type('input#password', 'u@@U5410154', { delay: 50 });
-      const continueSel2 = '#root > div > div > div.sc-dymIpo.izSiFn > div.withConditionalBorder.sc-bnXvFD.izlagV > div.sc-jzgbtB.bIuYUf > form > div > div:nth-child(4) > div > button';
-      console.log('[STEP] clicking password Continue');
+      await page.type('input#password', 'Gofresh@0425-21', { delay: 50 });
       await page.waitForSelector(continueSel2, { visible: true, timeout: 20000 });
+      console.log('[STEP] clicking password Continue');
       await page.click(continueSel2);
 
       console.log('[STEP] waiting 15s for post-login settle');
@@ -2227,19 +2265,74 @@ app.post('/api/check-contract-status', async (req, res) => {
 
       console.log('[STEP] storing session');
       browserSessions.set(systemType, { browser, page });
+
     } else {
+      // Reuse or fallback login
       console.log('[STEP] reusing existing session');
-      ({ browser, page } = browserSessions.get(systemType));
+      try {
+        ({ browser, page } = browserSessions.get(systemType));
 
-      // Close any extra tabs/popups so we start fresh
-      const pagesNow = await browser.pages();
-      for (let i = 1; i < pagesNow.length; i++) {
-        try { await pagesNow[i].close(); } catch {}
+        // Close any extra tabs/popups so we start fresh
+        const pagesNow = await browser.pages();
+        for (let i = 1; i < pagesNow.length; i++) {
+          try { await pagesNow[i].close(); } catch {}
+        }
+
+        // Reload the landing page to clear old iframes/state
+        await page.goto('https://mall-management.lotuss.com/Simplicity/apptop.aspx', { waitUntil: 'networkidle2' });
+        await page.waitForTimeout(2000);
+
+      } catch (reuseErr) {
+        console.warn('[WARN] Existing session invalid, clearing and re-logging in:', reuseErr.message);
+        browserSessions.delete(systemType);
+
+        // Fallback to fresh login logic
+        console.log('[STEP] launching browser/session');
+        browser = await puppeteer.launch({ headless: false });
+        page = await browser.newPage();
+
+        console.log('[STEP] going to apptop.aspx');
+        await page.goto('https://mall-management.lotuss.com/Simplicity/apptop.aspx', { waitUntil: 'networkidle2' });
+
+        console.log('[STEP] waiting for "go to login" button');
+        await page.waitForSelector('#lblToLoginPage', { visible: true, timeout: 20000 });
+        console.log('[STEP] clicking "go to login"');
+        await page.click('#lblToLoginPage');
+
+        console.log('[STEP] waiting 5s for username form');
+        await new Promise(r => setTimeout(r, 5000));
+
+        console.log('[STEP] typing username');
+        await page.waitForSelector('input#username', { visible: true, timeout: 20000 });
+        await page.type('input#username', 'john.pattanakarn@lotuss.com', { delay: 50 });
+        await page.waitForSelector(continueSel1, { visible: true, timeout: 20000 });
+        console.log('[STEP] clicking username Continue');
+        await page.click(continueSel1);
+
+        console.log('[STEP] waiting 5s for password form');
+        await new Promise(r => setTimeout(r, 5000));
+
+        console.log('[STEP] typing password');
+        await page.waitForSelector('input#password', { visible: true, timeout: 20000 });
+        await page.type('input#password', 'Gofresh@0425-21', { delay: 50 });
+        await page.waitForSelector(continueSel2, { visible: true, timeout: 20000 });
+        console.log('[STEP] clicking password Continue');
+        await page.click(continueSel2);
+
+        console.log('[STEP] waiting 15s for post-login settle');
+        await new Promise(r => setTimeout(r, 15000));
+
+        console.log('[STEP] verifying login succeeded');
+        const html2 = await page.content();
+        if (html2.includes('Invalid login')) {
+          console.log('[ERROR] Invalid credentials');
+          await browser.close();
+          return res.status(401).json({ message: 'Invalid credentials' });
+        }
+
+        console.log('[STEP] storing session');
+        browserSessions.set(systemType, { browser, page });
       }
-
-      // Reload the landing page to clear old iframes/state
-      await page.goto('https://mall-management.lotuss.com/Simplicity/apptop.aspx', { waitUntil: 'networkidle2' });
-      await page.waitForTimeout(2000);
     }
 
     // Small buffer before interacting
@@ -2256,7 +2349,7 @@ app.post('/api/check-contract-status', async (req, res) => {
     });
     await new Promise(r => setTimeout(r, 10000));
 
-    // Note: `contractNumber` is now safely defined
+    // Decide Offer vs Renewal
     const isLeaseOffer = contractNumber.includes('LO');
     const submenuText = isLeaseOffer ? 'Lease Offer' : 'Lease Renewal';
     console.log(`[STEP] clicking submenu "${submenuText}"`);
@@ -2284,20 +2377,15 @@ app.post('/api/check-contract-status', async (req, res) => {
       await frame.waitForSelector('#panel_SimpleSearch_c1', { visible: true, timeout: 50000 });
       searchFound = true;
     } catch (cssErr) {
-      console.warn('[WARN] CSS selector #panel_SimpleSearch_c1 not found after 50 s:', cssErr.message);
+      console.warn('[WARN] CSS selector not found after 50s:', cssErr.message);
       try {
-        const xpath = '//*[@id="panel_SimpleSearch_c1"]';
-        const handle = await frame.waitForXPath(xpath, { visible: true, timeout: 10000 });
-        if (handle) {
-          searchFound = true;
-        }
-      } catch (xpathErr) {
-        console.warn('[WARN] XPath //*[@id="panel_SimpleSearch_c1"] also not found:', xpathErr.message);
-      }
+        await frame.waitForXPath('//*[@id="panel_SimpleSearch_c1"]', { visible: true, timeout: 10000 });
+        searchFound = true;
+      } catch {}
     }
 
     if (!searchFound) {
-      console.error('[ERROR] Could not locate #panel_SimpleSearch_c1 in iframe—skipping status check.');
+      console.error('[ERROR] Search box not found; skipping status check.');
       return res.json({
         success: true,
         status: null,

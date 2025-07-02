@@ -57,6 +57,8 @@ function AIVision() {
   const [validationResult, setValidationResult] = useState(null);
   const [webValidationResult, setWebValidationResult] = useState(null);
   const [meterValidationResult, setMeterValidationResult] = useState(null);
+  const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
+
 
   // ─── Fetch available prompt keys on mount ────────────────────────────────────
   useEffect(() => {
