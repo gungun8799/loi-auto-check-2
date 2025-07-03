@@ -47,7 +47,7 @@ for (const folder of [PASSED_FOLDER, FAILED_FOLDER, SKIPPED_FOLDER]) {
 
     if (alreadyProcessed) {
       console.log(`[⏭️ Skip Confirmed] ${file} – already processed and up to date.`);
-    
+
       const filePath = path.join(FOLDER_PATH, file);
       if (fs.existsSync(filePath)) {
         console.log(`[🧪 Moving skipped file] Calling delayedMove()`);
@@ -55,7 +55,7 @@ for (const folder of [PASSED_FOLDER, FAILED_FOLDER, SKIPPED_FOLDER]) {
       } else {
         console.warn(`[⚠️ Skipped file not found] ${file} already missing from contracts folder.`);
       }
-    
+
       continue;
     }
 
@@ -151,7 +151,7 @@ async function processOneContract(filename) {
       throw err
     }
     const extractedText = extractRes.data.text
-    const geminiOut     = extractRes.data.geminiOutput
+    const geminiOut = extractRes.data.geminiOutput
     console.log('[✅ Backend extract complete]')
 
     // 2.2) Parse out the Contract Number from Gemini output
@@ -172,69 +172,125 @@ async function processOneContract(filename) {
     // 2.3) Auto‐scrape Simplicity for the extracted contract
     console.log(`[🔐 Auto-scrape for ${extractedContractNumber}]`)
     const scrapeRes = await axios.post('http://localhost:5001/api/scrape-url', {
-      systemType:      'simplicity',
+      systemType: 'simplicity',
       promptKey,
-      contractNumber:  extractedContractNumber,
+      contractNumber: extractedContractNumber,
     })
     if (!scrapeRes.data.success) {
       throw new Error(`Scrape-URL failed: ${scrapeRes.data.message}`)
     }
-    const webRaw       = scrapeRes.data.raw
+    const webRaw = scrapeRes.data.raw
     const webGeminiRaw = scrapeRes.data.geminiOutput
+
     console.log('[✅ Web scrape complete]')
 
-    
+
+    // TESTING 
+    // function cleanGeminiJson(raw) {
+    //   if (!raw) return '{}';
+
+    //   let t = raw.trim();
+
+    //   // Remove markdown code fences
+    //   if (t.startsWith("```json")) t = t.slice(7);
+    //   if (t.startsWith("```")) t = t.slice(3);
+    //   if (t.endsWith("```")) t = t.slice(0, -3);
+
+    //   // Remove control characters
+    //   t = t.replace(/[\u0000-\u001F]+/g, '');
+
+    //   // Remove any invalid trailing commas
+    //   t = t.replace(/,\s*([}\]])/g, '$1');
+
+    //   // Escape any standalone backslashes
+    //   t = t.replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
+
+    //   // Optional: normalize smart quotes (in case Gemini adds them)
+    //   t = t.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+
+    //   return t;
+    // } 
     function cleanGeminiJson(raw) {
-      if (!raw) return '{}';
-    
+      if (!raw || typeof raw !== 'string') return '{}';
+
       let t = raw.trim();
-    
+
       // Remove markdown code fences
       if (t.startsWith("```json")) t = t.slice(7);
-      if (t.startsWith("```")) t = t.slice(3);
+      else if (t.startsWith("```")) t = t.slice(3);
       if (t.endsWith("```")) t = t.slice(0, -3);
-    
-      // Remove control characters
-      t = t.replace(/[\u0000-\u001F]+/g, '');
-    
-      // Remove any invalid trailing commas
-      t = t.replace(/,\s*([}\]])/g, '$1');
-    
-      // Escape any standalone backslashes
-      t = t.replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
-    
-      // Optional: normalize smart quotes (in case Gemini adds them)
+
+      // Remove control characters except newline
+      t = t.replace(/[\u0000-\u0008\u000B-\u000C\u000E-\u001F]+/g, '');
+
+      // Normalize smart quotes
       t = t.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
-    
+
+      // Escape standalone backslashes
+      t = t.replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
+
+      // Remove trailing commas before } or ]
+      t = t.replace(/,\s*([}\]])/g, '$1');
+ 
+      // "Year 1 : Monthly Amount of service": 36000.00 - 2520.00 จะได้ผลลัพธ์ 33480
+      // โดย regex หา key: expression ใน JSON
+      t = t.replace(
+        /:\s*((?:\d+\.?\d*|\.\d+)(?:\s*[-+*/]\s*(?:\d+\.?\d*|\.\d+|\([^)]*\)))+)/g,
+        (match, expr) => {
+          const val = evalSimpleExpression(expr);
+          return `: ${typeof val === 'number' ? val : expr}`;
+        }
+      );
+
+      // Fix unbalanced braces/brackets
+      const openBraces = (t.match(/{/g) || []).length;
+      const closeBraces = (t.match(/}/g) || []).length;
+      const openBrackets = (t.match(/\[/g) || []).length;
+      const closeBrackets = (t.match(/]/g) || []).length;
+      if (openBraces > closeBraces) t += '}'.repeat(openBraces - closeBraces);
+      if (openBrackets > closeBrackets) t += ']'.repeat(openBrackets - closeBrackets);
+
       return t;
     }
-    
+
+    function evalSimpleExpression(str) {
+      try {
+        // ใช้ Function constructor เพื่อคำนวณ expression
+        const fn = new Function('return ' + str);
+        const val = fn();
+        return (typeof val === 'number' && !isNaN(val)) ? val : str;
+      } catch {
+        return str;
+      }
+    } 
+
     let parsedWeb;
     try {
       const cleanedWebGemini = cleanGeminiJson(webGeminiRaw);
+
       const b1 = cleanedWebGemini.indexOf('{');
       const b2 = cleanedWebGemini.lastIndexOf('}');
       const jsonString = cleanedWebGemini.slice(b1, b2 + 1);
-    
-      console.log('[🧪 Cleaned Web Gemini JSON Preview]', jsonString.slice(0, 300));
+
+      console.log('[🧪 Cleaned Web Gemini JSON Preview]', jsonString.slice(0, 300)); 
       parsedWeb = JSON.parse(jsonString);
     } catch (e) {
       console.error('[❌ Failed to parse web Gemini JSON]', e.message);
-      console.log('[🧨 Original Gemini Output]', webGeminiRaw?.slice(0, 500));
+      console.log('[🧨 Original Gemini Output]', webGeminiRaw?.slice(0, 500)); 
       throw new Error('Failed to parse web Gemini JSON: ' + e.message);
     }
 
     // 2.5) Gemini Compare
     const formattedSources = { pdf: parsedPdf, web: parsedWeb }
     const cmpRes = await axios.post('http://localhost:5001/api/gemini-compare', {
-       
+
       formattedSources,
       promptKey,
     })
     let cmpRaw = cmpRes.data.response.trim()
-    .replace(/^```json\s*/i, '')
-    .replace(/```$/, '')
-  
+      .replace(/^```json\s*/i, '')
+      .replace(/```$/, '')
+
     // ─── Sanitize invalid escape sequences ──────────────────────────────────────
     // 1) Remove any stray control characters (optional)
     // 2) Escape any backslash that isn’t already part of a valid escape
@@ -243,7 +299,7 @@ async function processOneContract(filename) {
       .replace(/[\u0000-\u001F]+/g, '')
       // escape any standalone backslashes
       .replace(/\\(?!["\\/bfnrtu])/g, '\\\\')
-    
+
     let compareResult
     try {
       compareResult = JSON.parse(sanitized)
@@ -263,22 +319,22 @@ async function processOneContract(filename) {
       .replace(/```$/, '')
     const validationResult = JSON.parse(val)
     await axios.post('http://localhost:5001/api/save-validation-result', {
-      contractNumber:    contractId,
+      contractNumber: contractId,
       validationResult,
     })
     console.log('[✅ Saved validation_result]')
 
     // 2.8) Web Validation
     const webValRes = await axios.post('http://localhost:5001/api/web-validate', {
-      contractNumber:  extractedContractNumber,
-      extractedData:   parsedWeb,
+      contractNumber: extractedContractNumber,
+      extractedData: parsedWeb,
       promptKey,
     })
     const webValidation = webValRes.data.validationResult
     if (Array.isArray(webValidation)) {
       await axios.post('http://localhost:5001/api/save-validation-result', {
-        contractNumber:    contractId,
-        validationResult:  webValidation,
+        contractNumber: contractId,
+        validationResult: webValidation,
       })
       console.log('[✅ Saved web_validation_result]')
     } else {
@@ -286,16 +342,16 @@ async function processOneContract(filename) {
     }
 
     // 2.9) Finally save compare + both validations in one shot
-const fullPayload = {
-  contractNumber:  contractId,
-  compareResult,
-  pdfGemini:       geminiOut,
-  webGemini:       webGeminiRaw,
-  validationResult,        // your document‐validation array
-  webValidationResult: webValidation  // your web‐validation array
-};
-await axios.post('http://localhost:5001/api/save-compare-result', fullPayload);
-console.log('[✅ Saved compare + validations together]');
+    const fullPayload = {
+      contractNumber: contractId,
+      compareResult,
+      pdfGemini: geminiOut,
+      webGemini: webGeminiRaw,
+      validationResult,        // your document‐validation array
+      webValidationResult: webValidation  // your web‐validation array
+    };
+    await axios.post('http://localhost:5001/api/save-compare-result', fullPayload);
+    console.log('[✅ Saved compare + validations together]');
 
     return true
 
@@ -303,7 +359,7 @@ console.log('[✅ Saved compare + validations together]');
     console.error('[❌ Error during processing]', err.message || err);
     // If anything in the above chain (extract→compare→validate→meter→web_validate) failed/timed out,
     // we close and return false so `processContractsInFolder` moves this PDF to “failed.”
-    try { await browser.close(); } catch {}
+    try { await browser.close(); } catch { }
     return false;
   }
 }
